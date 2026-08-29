@@ -11,6 +11,7 @@
     "build:web": "node scripts/clean-utools.js && vue-tsc --noEmit && vite build",
     "build:utools": "vue-tsc --noEmit && vite build && node scripts/copy-utools.js",
     "preview": "vite preview",
+    "sync:kenv": "npm run build && node -e \"const fs=require('fs'),path=require('path'),dest=path.join(process.env.USERPROFILE||process.env.HOME,'.kenv','assets','moment-notes','dist');fs.mkdirSync(dest,{recursive:true});fs.cpSync('dist',dest,{recursive:true});console.log('Synced dist to kenv assets');\"",
     "test": "vitest run",
     "lint": "eslint src --fix",
     "lint:nocache": "eslint src --fix --no-cache",
