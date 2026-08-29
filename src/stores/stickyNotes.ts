@@ -6,13 +6,14 @@ import { useUiStore } from './uiStore';
 import { COLOR_PRESETS } from './colorPresets';
 import * as helpers from './stickyNotesHelpers';
 import { storage, pasteTextToCursor } from '@utils/storage';
-import { Note, NoteType, ExportOptions, ImportOptions } from '@type';
+import { Note, NoteType, ExportOptions, ImportOptions, BackupData } from '@type';
 import { useShortcutStore } from './shortcutStore';
 import { getDefaultCategories } from './defaultData';
 import { getCurrentSettings, applySettings } from './settingsHelper';
 import { getFilteredAndSortedNotes, normalizeCategoryOrder } from './stickyNotesAlgorithms';
 import { commandRegistry } from '../domain/commands/CommandRegistry';
 import { categoryRepository, noteRepository } from '../infrastructure/storage/Repository';
+import { webdavSyncEngine } from '../infrastructure/sync/WebdavSyncEngine';
 
 export { COLOR_PRESETS };
 
@@ -214,9 +215,59 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
         noteStore.allNotes,
         getCurrentSettings(uiStore, noteStore, useShortcutStore(), categoryStore)
       );
+
+      // 启动时自动进行 WebDAV 云端同步 (拉取最新数据并合并)
+      if (webdavSyncEngine.config.value.enabled && webdavSyncEngine.config.value.autoSync) {
+        syncWithWebdav(false).catch(() => {});
+      }
     } catch (e) {
       console.error('Failed to load sticky notes data:', e);
     }
+  };
+
+  /**
+   * 获取当前全量数据快照 (用于导出与 WebDAV 同步)
+   */
+  const getCurrentBackupData = (): BackupData => {
+    const shortcutStore = useShortcutStore();
+    const settings = getCurrentSettings(uiStore, noteStore, shortcutStore, categoryStore);
+    return {
+      version: '1.6.0',
+      timestamp: Date.now(),
+      categories: categoryStore.categories,
+      notes: noteStore.allNotes,
+      settings
+    };
+  };
+
+  /**
+   * 应用合并后的数据 (从 WebDAV 拉取后刷新本地 Store)
+   */
+  const applyMergedBackupData = (data: BackupData) => {
+    if (data.categories && data.categories.length > 0) {
+      categoryStore.categories = data.categories;
+      categoryStore.saveCategories();
+    }
+    if (data.notes) {
+      noteStore.allNotes = data.notes;
+      noteStore.saveNotes();
+      noteStore.loadNotesForCurrentCategory();
+    }
+    if (data.settings) {
+      const shortcutStore = useShortcutStore();
+      applySettings(data.settings, uiStore, noteStore, shortcutStore, categoryStore);
+    }
+  };
+
+  /**
+   * 执行 WebDAV 云端双向同步
+   */
+  const syncWithWebdav = async (forcePush = false) => {
+    return await webdavSyncEngine.performSync(
+      getCurrentBackupData,
+      applyMergedBackupData,
+      { forcePush }
+    );
   };
 
   const reloadNotes = () => {
@@ -513,6 +564,9 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     isInitialized: readonly(isInitialized),
     loadData,
     reloadNotes,
+    syncWithWebdav,
+    getCurrentBackupData,
+    applyMergedBackupData,
     exportBackup,
     exportSelectedBackup,
     importBackup,
