@@ -148,6 +148,7 @@ onUnmounted(() => {
   align-items: center;
   flex: 1;
   max-width: 320px;
+  -webkit-app-region: no-drag !important;
 }
 
 .search-wrapper {
@@ -428,11 +429,6 @@ onUnmounted(() => {
     width: 22px;
     height: 22px;
     padding: 0;
-
-    .chevron-icon {
-      width: 12px;
-      height: 12px;
-    }
   }
 }
 </style>
