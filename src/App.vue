@@ -124,5 +124,15 @@ onUnmounted(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
+  border-radius: 16px;
+  border: 1px solid var(--panel-border);
+  box-sizing: border-box;
+
+  &.is-utools {
+    border-radius: 0;
+    border: none;
+    background: transparent;
+  }
 }
 </style>
