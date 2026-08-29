@@ -74,7 +74,23 @@ export interface AppSettings {
   categoryViewSettings?: Record<string, CategoryViewSetting>;
   shortcuts?: Array<{ id: string; currentKey: string }>;
   collapsedCategoryIds?: string[];
+  webdav?: WebdavConfig;
 }
+
+export interface WebdavConfig {
+  enabled: boolean;
+  serverUrl: string;
+  username: string;
+  password: string;
+  remotePath: string;
+  autoSync: boolean;
+  syncIntervalMinutes?: number;
+  lastSyncTime?: number;
+  lastSyncStatus?: 'success' | 'syncing' | 'error' | 'idle';
+  lastSyncMessage?: string;
+}
+
+export type WebdavSyncState = 'idle' | 'syncing' | 'success' | 'error';
 
 export interface BackupData {
   version: string;
