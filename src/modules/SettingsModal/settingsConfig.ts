@@ -349,7 +349,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         type: 'button-group',
         desc: '在设置中快速执行清空当前分类或清空最近删除等管理动作。',
         buttons: [
-          {\n            label: (store: any) => {
+          {
+            label: (store: any) => {
               if (store.currentCategoryId === 'trash') {
                 return '清空最近删除';
               }
