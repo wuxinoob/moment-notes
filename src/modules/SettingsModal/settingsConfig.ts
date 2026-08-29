@@ -1,11 +1,12 @@
 import { markRaw } from 'vue';
-import { Sun, Moon, Columns, Settings, Database, Info, Trash2, Keyboard } from '@lucide/vue';
+import { Sun, Moon, Columns, Settings, Database, Info, Trash2, Keyboard, Cloud } from '@lucide/vue';
 import {
   DOUBLE_CLICK_NOTE_ACTIONS,
   DOUBLE_CLICK_NOTE_ACTION_SETTING
 } from '../../domain/noteInteractions/DoubleClickNoteActionRegistry';
 import DataPanel from './DataPanel.vue';
 import AboutPanel from './AboutPanel.vue';
+import WebdavPanel from './WebdavPanel.vue';
 
 
 export interface SettingOption {
@@ -348,8 +349,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         type: 'button-group',
         desc: '在设置中快速执行清空当前分类或清空最近删除等管理动作。',
         buttons: [
-          {
-            label: (store: any) => {
+          {\n            label: (store: any) => {
               if (store.currentCategoryId === 'trash') {
                 return '清空最近删除';
               }
@@ -378,6 +378,20 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         type: 'component',
         desc: '导出备份能将当前所有的便签及分类列表转换为备份文件；导入恢复能从 JSON 备份中加载数据。',
         component: markRaw(DataPanel)
+      }
+    ]
+  },
+  {
+    id: 'webdav',
+    title: 'WebDAV 云端同步',
+    tabTitle: '云端同步',
+    icon: markRaw(Cloud),
+    items: [
+      {
+        key: 'webdavPanel',
+        label: '',
+        type: 'component',
+        component: markRaw(WebdavPanel)
       }
     ]
   },
