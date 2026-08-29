@@ -208,12 +208,15 @@ const handleAddNote = () => {
   gap: 16px;
   position: relative;
   z-index: 50;
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
 .actions-wrapper {
   display: flex;
   align-items: center;
   gap: 10px;
+  -webkit-app-region: no-drag !important;
 }
 
 .icon-btn {
