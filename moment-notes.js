@@ -8,16 +8,20 @@
 import "@johnlindquist/kit";
 import fs from "fs";
 import path from "path";
-import http from "http";
+import net from "net";
+import os from "os";
 import { execSync } from "child_process";
 
 // ====================================================================
-// 0. 极速单例抢占与 IPC 唤醒 (0ms Early Bind & Fast Mutex)
+// 0. 命名管道单实例守护与 IPC 唤醒 (Named Pipe Single-Instance IPC)
+// 完全脱离 TCP/IP 网络端口，采用 Windows/Unix 操作系统内核内存管道
 // ====================================================================
-const SINGLE_INSTANCE_PORT = 39281;
+const PIPE_NAME = "moment-notes-ipc";
+const PIPE_PATH = process.platform === "win32"
+  ? `\\\\.\\pipe\\${PIPE_NAME}`
+  : path.join(os.tmpdir(), `${PIPE_NAME}.sock`);
 
-let isPrimaryInstance = false;
-let server = null;
+let pipeServer = null;
 let pendingToggleRequest = false;
 
 // 窗口显隐调度占位函数 (窗口 ready 后绑定真实实现)
@@ -31,59 +35,64 @@ let hideNotesHandler = () => {
   pendingToggleRequest = false;
 };
 
-// 在脚本第一行立即尝试创建并监听端口，消除启动空窗竞态
-try {
-  server = http.createServer((req, res) => {
-    if (req.url === "/toggle") {
-      toggleNotesHandler();
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("OK");
-    } else if (req.url === "/show") {
-      showNotesHandler();
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("OK");
-    } else if (req.url === "/hide") {
-      hideNotesHandler();
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("OK");
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
+// 1. 尝试以客户端身份连接已有命名管道 (0ms 探测是否已有运行中的主实例)
+const alreadyRunning = await new Promise((resolve) => {
+  const client = net.connect(PIPE_PATH, () => {
+    // 连接成功：说明已有主实例在运行！发送 "toggle" 唤醒指令
+    client.write("toggle\n", () => {
+      client.end();
+      resolve(true);
+    });
   });
 
-  isPrimaryInstance = await new Promise((resolve) => {
-    server.once("error", (err) => {
-      if (err.code === "EADDRINUSE") {
-        resolve(false); // 端口已被主实例占用
-      } else {
-        resolve(false);
-      }
-    });
-    server.listen(SINGLE_INSTANCE_PORT, "127.0.0.1", () => {
-      resolve(true); // 成功占领端口，成为唯一的主实例
-    });
+  client.on("error", () => {
+    // 连接失败 (管道未创建 / 无主实例)，判定为首个启动进程
+    resolve(false);
   });
-} catch {
-  isPrimaryInstance = false;
+
+  client.setTimeout(1500, () => {
+    client.destroy();
+    resolve(false);
+  });
+});
+
+if (alreadyRunning) {
+  // 当前是次级进程：已成功向主实例派发唤醒信号，当前进程立即退出，绝不创建多余窗口
+  exit();
 }
 
-if (!isPrimaryInstance) {
-  // 当前是次级进程：向已存在的唯一主实例发送唤醒信号，超时放宽至 1500ms
-  try {
-    await new Promise((resolve) => {
-      const req = http.get(`http://127.0.0.1:${SINGLE_INSTANCE_PORT}/toggle`, (res) => {
-        resolve(true);
-      });
-      req.on("error", () => resolve(false));
-      req.setTimeout(1500, () => {
-        req.destroy();
-        resolve(false);
-      });
+// 2. 清理 Unix 平台可能残留的 .sock 文件 (Windows 命名管道由系统内核自动释放，无需手动 unlink)
+if (process.platform !== "win32") {
+  try { fs.unlinkSync(PIPE_PATH); } catch {}
+}
+
+// 3. 作为唯一主实例启动命名管道服务端
+try {
+  pipeServer = net.createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString();
+      if (buffer.includes("\n")) {
+        const cmd = buffer.trim();
+        if (cmd === "toggle") {
+          toggleNotesHandler();
+        } else if (cmd === "show") {
+          showNotesHandler();
+        } else if (cmd === "hide") {
+          hideNotesHandler();
+        }
+        buffer = "";
+      }
     });
-  } catch {}
-  // 无论唤醒成功与否，次级进程绝不创建窗口，立即退出
-  exit();
+  });
+
+  pipeServer.on("error", (err) => {
+    console.error("Named Pipe Server Error:", err);
+  });
+
+  pipeServer.listen(PIPE_PATH);
+} catch (err) {
+  console.error("Failed to start named pipe server:", err);
 }
 
 // ====================================================================
@@ -294,9 +303,12 @@ if (!pendingToggleRequest) {
 // 5. 事件与生命周期管理 (0% CPU 驻留与干净回收)
 // ====================================================================
 
-// 核心防御：窗口被真正销毁或外部关闭时，安全终止 Node 进程
+// 核心防御：窗口被真正销毁或外部关闭时，安全终止 Node 进程并释放命名管道
 notesWidget.onClose(() => {
-  try { server.close(); } catch {}
+  try { pipeServer?.close(); } catch {}
+  if (process.platform !== "win32") {
+    try { fs.unlinkSync(PIPE_PATH); } catch {}
+  }
   exit();
 });
 
