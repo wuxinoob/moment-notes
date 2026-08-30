@@ -13,18 +13,24 @@ import os from "os";
 import { execSync } from "child_process";
 
 // ====================================================================
-// 0. 命名管道单实例守护与 IPC 唤醒 (Named Pipe Single-Instance IPC)
-// 完全脱离 TCP/IP 网络端口，采用 Windows/Unix 操作系统内核内存管道
+// 0. 命名管道单实例守护与代码热更新自愈 (Named Pipe Auto-Evicting IPC)
 // ====================================================================
 const PIPE_NAME = "moment-notes-ipc";
 const PIPE_PATH = process.platform === "win32"
   ? `\\\\.\\pipe\\${PIPE_NAME}`
   : path.join(os.tmpdir(), `${PIPE_NAME}.sock`);
 
+let scriptMtime = Date.now();
+try {
+  const currentScriptPath = new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+  if (fs.existsSync(currentScriptPath)) {
+    scriptMtime = Math.round(fs.statSync(currentScriptPath).mtimeMs);
+  }
+} catch {}
+
 let pipeServer = null;
 let pendingToggleRequest = false;
 
-// 窗口显隐调度占位函数 (窗口 ready 后绑定真实实现)
 let toggleNotesHandler = () => {
   pendingToggleRequest = !pendingToggleRequest;
 };
@@ -35,73 +41,95 @@ let hideNotesHandler = () => {
   pendingToggleRequest = false;
 };
 
-// 1. 尝试以客户端身份连接已有命名管道 (0ms 探测是否已有运行中的主实例)
-const alreadyRunning = await new Promise((resolve) => {
+// 1. 尝试向已有主实例握手通信
+const handshakeResult = await new Promise((resolve) => {
   const client = net.connect(PIPE_PATH, () => {
-    // 连接成功：说明已有主实例在运行！发送 "toggle" 唤醒指令
-    client.write("toggle\n", () => {
-      client.end();
-      resolve(true);
+    let response = "";
+    client.write(`PING ${scriptMtime}\n`);
+
+    client.on("data", (chunk) => {
+      response += chunk.toString();
+      if (response.includes("\n")) {
+        const reply = response.trim();
+        client.end();
+        if (reply === "RELOAD") {
+          resolve("UPGRADE_TO_PRIMARY");
+        } else {
+          resolve("WOKEN");
+        }
+      }
     });
   });
 
   client.on("error", () => {
-    // 连接失败 (管道未创建 / 无主实例)，判定为首个启动进程
-    resolve(false);
+    resolve("START_PRIMARY");
   });
 
   client.setTimeout(1500, () => {
     client.destroy();
-    resolve(false);
+    resolve("START_PRIMARY");
   });
 });
 
-if (alreadyRunning) {
-  // 当前是次级进程：已成功向主实例派发唤醒信号，当前进程立即退出，绝不创建多余窗口
+if (handshakeResult === "WOKEN") {
   exit();
 }
 
-// 2. 清理 Unix 平台可能残留的 .sock 文件 (Windows 命名管道由系统内核自动释放，无需手动 unlink)
+if (handshakeResult === "UPGRADE_TO_PRIMARY") {
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+// 2. 清理 Unix 残留 socket
 if (process.platform !== "win32") {
   try { fs.unlinkSync(PIPE_PATH); } catch {}
 }
 
-// 3. 作为唯一主实例启动命名管道服务端
+// 3. 启动命名管道服务
 try {
   pipeServer = net.createServer((socket) => {
     let buffer = "";
     socket.on("data", (chunk) => {
       buffer += chunk.toString();
       if (buffer.includes("\n")) {
-        const cmd = buffer.trim();
-        if (cmd === "toggle") {
-          toggleNotesHandler();
-        } else if (cmd === "show") {
-          showNotesHandler();
-        } else if (cmd === "hide") {
-          hideNotesHandler();
-        }
+        const msg = buffer.trim();
         buffer = "";
+
+        if (msg.startsWith("PING")) {
+          const parts = msg.split(" ");
+          const clientMtime = parseInt(parts[1] || "0", 10);
+          if (clientMtime > scriptMtime + 1000) {
+            socket.write("RELOAD\n");
+            socket.end();
+            try { pipeServer.close(); } catch {}
+            try { notesWidget?.close(); } catch {}
+            setTimeout(() => exit(), 50);
+            return;
+          } else {
+            toggleNotesHandler();
+            socket.write("PONG\n");
+            socket.end();
+            return;
+          }
+        } else if (msg === "toggle") {
+          toggleNotesHandler();
+          socket.write("OK\n");
+          socket.end();
+        } else if (msg === "show") {
+          showNotesHandler();
+          socket.write("OK\n");
+          socket.end();
+        } else if (msg === "hide") {
+          hideNotesHandler();
+          socket.write("OK\n");
+          socket.end();
+        }
       }
     });
   });
 
   pipeServer.on("error", (err) => {
     if (err.code === "EADDRINUSE" || err.code === "EEXIST") {
-      // 端口/管道已被主实例占用（说明前面探测时主实例正在启动），立即尝试二次唤醒并退出
-      try {
-        const retryClient = net.connect(PIPE_PATH, () => {
-          retryClient.write("toggle\n", () => {
-            retryClient.end();
-            exit();
-          });
-        });
-        retryClient.on("error", () => exit());
-      } catch {
-        exit();
-      }
-    } else {
-      console.error("Named Pipe Server Error:", err);
+      exit();
     }
   });
 
