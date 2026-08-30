@@ -219,6 +219,14 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
       // 启动时自动进行 WebDAV 云端同步 (拉取最新数据并合并)
       if (webdavSyncEngine.config.value.enabled && webdavSyncEngine.config.value.autoSync) {
         syncWithWebdav(false).catch(() => {});
+
+        // 开启常驻后台定时静默双向轮询 (默认每 5 分钟自动同步一次，适配多端常驻)
+        const intervalMinutes = webdavSyncEngine.config.value.syncIntervalMinutes || 5;
+        setInterval(() => {
+          if (webdavSyncEngine.config.value.enabled && webdavSyncEngine.config.value.autoSync) {
+            syncWithWebdav({ silent: true }).catch(() => {});
+          }
+        }, intervalMinutes * 60 * 1000);
       }
     } catch (e) {
       console.error('Failed to load sticky notes data:', e);

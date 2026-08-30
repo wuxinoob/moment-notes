@@ -12,29 +12,77 @@ import http from "http";
 import { execSync } from "child_process";
 
 // ====================================================================
-// 0. 单例守护与多实例互斥唤醒 (Single-Instance Mutex & Toggle)
+// 0. 极速单例抢占与 IPC 唤醒 (0ms Early Bind & Fast Mutex)
 // ====================================================================
 const SINGLE_INSTANCE_PORT = 39281;
 
-// 尝试唤醒或切换已存在的便签单例
-async function tryToggleExistingInstance() {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${SINGLE_INSTANCE_PORT}/toggle`, (res) => {
-      resolve(true); // 成功唤醒已存在的单例
+let isPrimaryInstance = false;
+let server = null;
+let pendingToggleRequest = false;
+
+// 窗口显隐调度占位函数 (窗口 ready 后绑定真实实现)
+let toggleNotesHandler = () => {
+  pendingToggleRequest = !pendingToggleRequest;
+};
+let showNotesHandler = () => {
+  pendingToggleRequest = true;
+};
+let hideNotesHandler = () => {
+  pendingToggleRequest = false;
+};
+
+// 在脚本第一行立即尝试创建并监听端口，消除启动空窗竞态
+try {
+  server = http.createServer((req, res) => {
+    if (req.url === "/toggle") {
+      toggleNotesHandler();
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("OK");
+    } else if (req.url === "/show") {
+      showNotesHandler();
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("OK");
+    } else if (req.url === "/hide") {
+      hideNotesHandler();
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("OK");
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  isPrimaryInstance = await new Promise((resolve) => {
+    server.once("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        resolve(false); // 端口已被主实例占用
+      } else {
+        resolve(false);
+      }
     });
-    req.on("error", () => {
-      resolve(false); // 无运行中实例
-    });
-    req.setTimeout(250, () => {
-      req.destroy();
-      resolve(false);
+    server.listen(SINGLE_INSTANCE_PORT, "127.0.0.1", () => {
+      resolve(true); // 成功占领端口，成为唯一的主实例
     });
   });
+} catch {
+  isPrimaryInstance = false;
 }
 
-const isAlreadyRunning = await tryToggleExistingInstance();
-if (isAlreadyRunning) {
-  // 已成功唤醒现有窗口，当前进程直接退出，绝不创建第二个窗口
+if (!isPrimaryInstance) {
+  // 当前是次级进程：向已存在的唯一主实例发送唤醒信号，超时放宽至 1500ms
+  try {
+    await new Promise((resolve) => {
+      const req = http.get(`http://127.0.0.1:${SINGLE_INSTANCE_PORT}/toggle`, (res) => {
+        resolve(true);
+      });
+      req.on("error", () => resolve(false));
+      req.setTimeout(1500, () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+  } catch {}
+  // 无论唤醒成功与否，次级进程绝不创建窗口，立即退出
   exit();
 }
 
@@ -211,52 +259,36 @@ const notesWidget = await widget(appUrl, {
 
 let isVisible = false;
 
-// 窗口显隐调度函数
-async function showNotes() {
-  notesWidget.show();
-  notesWidget.focus();
-  isVisible = true;
-}
+// 绑定真实窗口显隐调度函数
+showNotesHandler = async () => {
+  try {
+    notesWidget.show();
+    notesWidget.focus();
+    isVisible = true;
+  } catch {}
+};
 
-async function hideNotes() {
-  notesWidget.hide();
-  isVisible = false;
-}
+hideNotesHandler = async () => {
+  try {
+    notesWidget.hide();
+    isVisible = false;
+  } catch {}
+};
 
-async function toggleNotes() {
+toggleNotesHandler = async () => {
   if (isVisible) {
-    await hideNotes();
+    await hideNotesHandler();
   } else {
-    await showNotes();
+    await showNotesHandler();
   }
+};
+
+// 首次启动时自动显示便签主面板 (若在启动期间收到了 toggle 信号则按最终状态呈现)
+if (!pendingToggleRequest) {
+  await showNotesHandler();
+} else {
+  await toggleNotesHandler();
 }
-
-// 首次启动时自动显示便签主面板
-await showNotes();
-
-// ====================================================================
-// 4. 单例 IPC 服务 (接收后续快捷键 / 外部唤醒指令)
-// ====================================================================
-const server = http.createServer((req, res) => {
-  if (req.url === "/toggle") {
-    toggleNotes();
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-  } else if (req.url === "/show") {
-    showNotes();
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-  } else if (req.url === "/hide") {
-    hideNotes();
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-  } else {
-    res.writeHead(404);
-    res.end();
-  }
-});
-
-server.listen(SINGLE_INSTANCE_PORT, "127.0.0.1");
 
 // ====================================================================
 // 5. 事件与生命周期管理 (0% CPU 驻留与干净回收)
@@ -271,12 +303,12 @@ notesWidget.onClose(() => {
 // 监听前端发来的自定义 IPC 消息（如点击关闭按钮或快捷键）
 notesWidget.onCustom(async (data) => {
   if (data?.action === "hide" || data?.action === "close") {
-    await hideNotes();
+    await hideNotesHandler();
   } else if (data?.action === "quit") {
     notesWidget.close();
     exit();
   } else if (data?.action === "toggle") {
-    await toggleNotes();
+    await toggleNotesHandler();
   }
 });
 
