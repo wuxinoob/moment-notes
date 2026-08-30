@@ -232,7 +232,7 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     const shortcutStore = useShortcutStore();
     const settings = getCurrentSettings(uiStore, noteStore, shortcutStore, categoryStore);
     return {
-      version: '1.6.0',
+      version: '1.7.0',
       timestamp: Date.now(),
       categories: categoryStore.categories,
       notes: noteStore.allNotes,

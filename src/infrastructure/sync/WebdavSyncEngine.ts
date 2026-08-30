@@ -325,7 +325,7 @@ export class WebdavSyncEngine {
     });
 
     return {
-      version: '1.6.0',
+      version: '1.7.0',
       timestamp: now,
       categories: activeCategories,
       notes: activeNotes,
