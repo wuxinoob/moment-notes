@@ -87,12 +87,27 @@ try {
   });
 
   pipeServer.on("error", (err) => {
-    console.error("Named Pipe Server Error:", err);
+    if (err.code === "EADDRINUSE" || err.code === "EEXIST") {
+      // 端口/管道已被主实例占用（说明前面探测时主实例正在启动），立即尝试二次唤醒并退出
+      try {
+        const retryClient = net.connect(PIPE_PATH, () => {
+          retryClient.write("toggle\n", () => {
+            retryClient.end();
+            exit();
+          });
+        });
+        retryClient.on("error", () => exit());
+      } catch {
+        exit();
+      }
+    } else {
+      console.error("Named Pipe Server Error:", err);
+    }
   });
 
   pipeServer.listen(PIPE_PATH);
-} catch (err) {
-  console.error("Failed to start named pipe server:", err);
+} catch {
+  exit();
 }
 
 // ====================================================================
@@ -298,6 +313,25 @@ if (!pendingToggleRequest) {
 } else {
   await toggleNotesHandler();
 }
+
+// 核心修复：注入 Esc 按键拦截与通信，当用户在前端按 Esc 时精准同步 Node 端 isVisible 状态
+try {
+  await notesWidget.executeJavaScript(`
+    (function() {
+      window.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          const hasModal = document.querySelector('.modal-overlay, .modal-backdrop, .preview-modal, .confirm-modal');
+          if (!hasModal && window.ipcRenderer) {
+            window.ipcRenderer.send('WIDGET_CUSTOM', {
+              widgetId: window.widgetId,
+              action: 'hide'
+            });
+          }
+        }
+      }, true);
+    })();
+  `);
+} catch {}
 
 // ====================================================================
 // 5. 事件与生命周期管理 (0% CPU 驻留与干净回收)
