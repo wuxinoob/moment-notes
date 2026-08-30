@@ -260,13 +260,14 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
   };
 
   /**
-   * 执行 WebDAV 云端双向同步
+   * 执行 WebDAV 云端同步 (支持智能双向墓碑合并、强制推送与强制拉取)
    */
-  const syncWithWebdav = async (forcePush = false) => {
+  const syncWithWebdav = async (options?: boolean | { forcePush?: boolean; forcePull?: boolean; silent?: boolean }) => {
+    const opts = typeof options === 'boolean' ? { forcePush: options } : (options || {});
     return await webdavSyncEngine.performSync(
       getCurrentBackupData,
       applyMergedBackupData,
-      { forcePush }
+      opts
     );
   };
 

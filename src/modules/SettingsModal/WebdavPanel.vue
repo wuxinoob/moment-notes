@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref, computed } from 'vue';
-import { Cloud, CheckCircle2, AlertCircle, RefreshCw, Eye, EyeOff, Plug, ArrowUpCircle } from '@lucide/vue';
+import { Cloud, CheckCircle2, AlertCircle, RefreshCw, Eye, EyeOff, Plug, ArrowUpCircle, ArrowDownCircle, ShieldCheck } from '@lucide/vue';
 import { webdavSyncEngine } from '../../infrastructure/sync/WebdavSyncEngine';
 import { useStickyNotesStore } from '../../stores/stickyNotes';
 import { useUiStore } from '../../stores/uiStore';
@@ -46,11 +46,20 @@ const handleTestConnection = async () => {
   }
 };
 
-const handleManualSync = async (forcePush = false) => {
+const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'smart') => {
   handleSave();
-  uiStore.showToast(forcePush ? '正在全量上传覆盖远端...' : '正在进行 WebDAV 双向同步...');
+  if (mode === 'forcePush') {
+    uiStore.showToast('正在全量上传覆盖远端...');
+  } else if (mode === 'forcePull') {
+    uiStore.showToast('正在从远端拉取覆盖本地...');
+  } else {
+    uiStore.showToast('正在进行智能双向墓碑合并同步...');
+  }
   
-  const res = await stickyStore.syncWithWebdav(forcePush);
+  const res = await stickyStore.syncWithWebdav({
+    forcePush: mode === 'forcePush',
+    forcePull: mode === 'forcePull'
+  });
   if (res.success) {
     uiStore.showToast(`✅ ${res.message}`);
   } else {
@@ -82,7 +91,7 @@ const handleManualSync = async (forcePush = false) => {
       <button
         class="sync-now-btn"
         :disabled="!config.enabled || syncState === 'syncing'"
-        @click="() => handleManualSync(false)"
+        @click="() => handleManualSync('smart')"
       >
         <RefreshCw class="btn-icon" :class="{ spin: syncState === 'syncing' }" />
         <span>立即同步</span>
@@ -99,7 +108,7 @@ const handleManualSync = async (forcePush = false) => {
         </div>
         <label class="switch-control">
           <input v-model="config.enabled" type="checkbox" @change="handleSave" />
-          <span class="slider" />
+          <span class="slider"></span>
         </label>
       </div>
 
@@ -172,8 +181,17 @@ const handleManualSync = async (forcePush = false) => {
           </div>
           <label class="switch-control">
             <input v-model="config.autoSync" type="checkbox" @change="handleSave" />
-            <span class="slider" />
+            <span class="slider"></span>
           </label>
+        </div>
+
+        <!-- 墓碑机制说明卡片 -->
+        <div class="tombstone-info-box">
+          <ShieldCheck class="shield-icon" />
+          <div class="info-content">
+            <span class="info-title">已启用分布式墓碑同步 (Tombstone Merge)</span>
+            <span class="info-desc">跨设备删除、编辑与新建自动比对时间戳进行安全双向合并，彻底杜绝单侧删除后便签复活问题。</span>
+          </div>
         </div>
 
         <!-- 测试与操作按钮栏 -->
@@ -182,9 +200,17 @@ const handleManualSync = async (forcePush = false) => {
             <Plug class="btn-icon" />
             <span>{{ isTesting ? '测试中...' : '测试连接' }}</span>
           </button>
-          <button class="tool-btn force-btn" @click="() => handleManualSync(true)">
+          <button class="tool-btn sync-btn" :disabled="syncState === 'syncing'" @click="() => handleManualSync('smart')">
+            <RefreshCw class="btn-icon" :class="{ spin: syncState === 'syncing' }" />
+            <span>双向智能同步</span>
+          </button>
+          <button class="tool-btn force-btn" @click="() => handleManualSync('forcePush')">
             <ArrowUpCircle class="btn-icon" />
             <span>覆盖推送到云端</span>
+          </button>
+          <button class="tool-btn pull-btn" @click="() => handleManualSync('forcePull')">
+            <ArrowDownCircle class="btn-icon" />
+            <span>从云端强制拉取</span>
           </button>
         </div>
 
@@ -397,9 +423,46 @@ const handleManualSync = async (forcePush = false) => {
   }
 }
 
+.tombstone-info-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+
+  .shield-icon {
+    width: 18px;
+    height: 18px;
+    color: #60a5fa;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .info-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    .info-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #93c5fd;
+    }
+
+    .info-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+  }
+}
+
 .actions-row {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 4px;
 }
 

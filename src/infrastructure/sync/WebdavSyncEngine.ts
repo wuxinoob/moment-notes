@@ -232,71 +232,114 @@ export class WebdavSyncEngine {
   }
 
   /**
-   * 智能双向冲突合并算法 (Bidirectional Smart Merge)
-   * 比较本地与远端数据，按时间戳更新者为准进行安全合并
+   * 墓碑双向智能冲突合并算法 (Tombstone-Aware Smart Merge)
+   * 1. 纳入 deletedAt / isDeleted 状态与时间戳权重比较；
+   * 2. 若一边删除了便签/分类（deletedAt 较新），向另一边同步删除状态，杜绝幽灵复活；
+   * 3. 若另一边在删除之后又进行了新编辑（updatedAt > deletedAt），则自动撤销删除并保留最新内容；
+   * 4. 自动执行超过 30 天的过期墓碑垃圾回收 (Tombstone GC)。
    */
   public mergeBackupData(localData: BackupData, remoteData: BackupData): BackupData {
-    // 1. 合并便签
+    const now = Date.now();
+    const GC_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000; // 30天以上的删除墓碑安全物理清理
+
+    // 1. 合并便签列表 (Notes)
     const noteMap = new Map<string, Note>();
-
-    // 先压入远端便签
-    for (const rNote of remoteData.notes || []) {
-      if (rNote && rNote.id) {
-        noteMap.set(rNote.id, rNote);
-      }
+    const allNoteIds = new Set<string>();
+    for (const n of localData.notes || []) {
+      if (n && n.id) allNoteIds.add(n.id);
+    }
+    for (const n of remoteData.notes || []) {
+      if (n && n.id) allNoteIds.add(n.id);
     }
 
-    // 与本地便签对比合并
-    for (const lNote of localData.notes || []) {
-      if (!lNote || !lNote.id) continue;
-      const existing = noteMap.get(lNote.id);
-      if (!existing) {
-        noteMap.set(lNote.id, lNote);
-      } else {
-        const localTime = Math.max(lNote.updatedAt || 0, lNote.createdAt || 0);
-        const remoteTime = Math.max(existing.updatedAt || 0, existing.createdAt || 0);
-        // 本地更新或者相等时保留本地
-        if (localTime >= remoteTime) {
-          noteMap.set(lNote.id, lNote);
-        }
-      }
-    }
+    const localNoteMap = new Map((localData.notes || []).map(n => [n.id, n]));
+    const remoteNoteMap = new Map((remoteData.notes || []).map(n => [n.id, n]));
 
-    // 2. 合并分类
-    const catMap = new Map<string, Category>();
-    for (const rCat of remoteData.categories || []) {
-      if (rCat && rCat.id) {
-        catMap.set(rCat.id, rCat);
-      }
-    }
-    for (const lCat of localData.categories || []) {
-      if (lCat && lCat.id) {
-        const existing = catMap.get(lCat.id);
-        if (!existing) {
-          catMap.set(lCat.id, lCat);
+    for (const id of allNoteIds) {
+      const lNote = localNoteMap.get(id);
+      const rNote = remoteNoteMap.get(id);
+
+      if (lNote && !rNote) {
+        noteMap.set(id, lNote);
+      } else if (!lNote && rNote) {
+        noteMap.set(id, rNote);
+      } else if (lNote && rNote) {
+        const lTime = Math.max(lNote.updatedAt || 0, lNote.deletedAt || 0, lNote.createdAt || 0);
+        const rTime = Math.max(rNote.updatedAt || 0, rNote.deletedAt || 0, rNote.createdAt || 0);
+
+        if (lTime >= rTime) {
+          noteMap.set(id, lNote);
         } else {
-          // 优先保留本地最新修改
-          catMap.set(lCat.id, lCat);
+          noteMap.set(id, rNote);
         }
       }
     }
+
+    // 过滤超过 30 天的过期已删除便签 (GC 垃圾回收)
+    const activeNotes = Array.from(noteMap.values()).filter(note => {
+      if (note.isDeleted && note.deletedAt && (now - note.deletedAt > GC_THRESHOLD_MS)) {
+        return false;
+      }
+      return true;
+    });
+
+    // 2. 合并分类列表 (Categories)
+    const catMap = new Map<string, Category>();
+    const allCatIds = new Set<string>();
+    for (const c of localData.categories || []) {
+      if (c && c.id) allCatIds.add(c.id);
+    }
+    for (const c of remoteData.categories || []) {
+      if (c && c.id) allCatIds.add(c.id);
+    }
+
+    const localCatMap = new Map((localData.categories || []).map(c => [c.id, c]));
+    const remoteCatMap = new Map((remoteData.categories || []).map(c => [c.id, c]));
+
+    for (const id of allCatIds) {
+      const lCat = localCatMap.get(id);
+      const rCat = remoteCatMap.get(id);
+
+      if (lCat && !rCat) {
+        catMap.set(id, lCat);
+      } else if (!lCat && rCat) {
+        catMap.set(id, rCat);
+      } else if (lCat && rCat) {
+        const lTime = Math.max(lCat.updatedAt || 0, lCat.deletedAt || 0, lCat.createdAt || 0);
+        const rTime = Math.max(rCat.updatedAt || 0, rCat.deletedAt || 0, rCat.createdAt || 0);
+
+        if (lTime >= rTime) {
+          catMap.set(id, lCat);
+        } else {
+          catMap.set(id, rCat);
+        }
+      }
+    }
+
+    // 过滤超过 30 天的过期已删除分类 (GC 垃圾回收)
+    const activeCategories = Array.from(catMap.values()).filter(cat => {
+      if (cat.isDeleted && cat.deletedAt && (now - cat.deletedAt > GC_THRESHOLD_MS)) {
+        return false;
+      }
+      return true;
+    });
 
     return {
       version: '1.6.0',
-      timestamp: Date.now(),
-      categories: Array.from(catMap.values()),
-      notes: Array.from(noteMap.values()),
+      timestamp: now,
+      categories: activeCategories,
+      notes: activeNotes,
       settings: localData.settings || remoteData.settings
     };
   }
 
   /**
-   * 执行完整的双向云同步流程
+   * 执行完整的 WebDAV 云同步流程 (支持双向墓碑合并、强制推送、强制拉取)
    */
   public async performSync(
     getLocalData: () => BackupData,
     applyMergedData: (data: BackupData) => void,
-    options?: { forcePush?: boolean; silent?: boolean }
+    options?: { forcePush?: boolean; forcePull?: boolean; silent?: boolean }
   ): Promise<{ success: boolean; message: string; mergedNotesCount?: number }> {
     const cfg = this.config.value;
     if (!cfg.enabled || !cfg.serverUrl || !cfg.remotePath) {
@@ -312,13 +355,34 @@ export class WebdavSyncEngine {
       const localData = getLocalData();
       let finalDataToUpload = localData;
 
+      if (options?.forcePull) {
+        // 强制从云端覆盖本地
+        const remoteResult = await client.downloadJson<BackupData>(cfg.remotePath);
+        if (!remoteResult.exists || !remoteResult.data) {
+          throw new Error('远端未发现有效的备份文件');
+        }
+        const remoteBackup = BackupCodec.decode(JSON.stringify(remoteResult.data));
+        if (!remoteBackup) {
+          throw new Error('远端备份数据解析失败');
+        }
+        applyMergedData(remoteBackup);
+        this.syncState.value = 'success';
+        this.syncMessage.value = `已强制从云端拉取覆盖本地 (${new Date().toLocaleTimeString()})`;
+        this.saveConfig({
+          lastSyncTime: Date.now(),
+          lastSyncStatus: 'success',
+          lastSyncMessage: this.syncMessage.value
+        });
+        return { success: true, message: '已从云端拉取覆盖本地', mergedNotesCount: remoteBackup.notes.length };
+      }
+
       if (!options?.forcePush) {
         // 1. 先尝试拉取远端文件
         const remoteResult = await client.downloadJson<BackupData>(cfg.remotePath);
         if (remoteResult.exists && remoteResult.data) {
           const remoteBackup = BackupCodec.decode(JSON.stringify(remoteResult.data));
           if (remoteBackup) {
-            // 2. 双向智能合并
+            // 2. 双向智能墓碑合并
             finalDataToUpload = this.mergeBackupData(localData, remoteBackup);
             // 3. 将合并后数据刷入本地 Store
             applyMergedData(finalDataToUpload);

@@ -6,7 +6,10 @@ export interface Category {
   id: string;
   name: string;
   createdAt: number;
+  updatedAt?: number;
   parentId?: string;
+  isDeleted?: boolean;
+  deletedAt?: number;
 }
 
 export type NoteType = 'text' | 'markdown';

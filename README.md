@@ -1,53 +1,64 @@
-# 📌 uTools 拾光便签 (MomentNotes)
+# 📌 拾光便签 (MomentNotes) - WebDAV & Script Kit 增强版
 
-![预览图](./docs/images/pic1.png)
-
-> **高颜值便签，可配置双击动作。**
+> **高颜值、高生产力的跨平台便签工具，支持 WebDAV 智能云同步与 Script Kit 桌面极速常驻。**
 >
-> 拾光便签是一款基于 **Vue 3 + TypeScript + Pinia + Sass** 构建的高颜值、生产力工具型 uTools 便签插件。融入了现代 **Glassmorphism** 风格与 **Fluent Design** 微动效交互，支持可配置双击动作、超级面板文本捕获、多级分类与数据云同步，助你清爽、高效地记录日常灵感与备忘。
+> 本项目在原版 [LingLingDayo/moment-notes](https://github.com/LingLingDayo/moment-notes) 优秀设计的基础上进行了深度二次开发，打造了**全生态兼容（uTools / Script Kit / 独立 Web 浏览器）**与**企业级 WebDAV 分布式云同步**的全新体验。
 
 ---
 
-## 🌈 核心特色
+## 🌟 核心差异与增强特性 (Key Differences from Upstream)
 
-- 🚀 **双击动作**：非编辑状态下双击卡片可执行“复制并粘贴到光标处”“全屏查看”“移入最近删除”或“不执行任何操作”，默认使用复制粘贴。
-- 📂 **分类管理**：支持无限层级的子分类与自由排序，配备“最近使用”高频分类与“最近删除”回收站。
-- 🔍 **多维检索**：支持空格分隔的多关键词检索，结合内嵌式范围下拉框，支持“标题/内容/标签”精准与模糊搜索。
-- 📝 **Markdown**：支持纯文本与 Markdown 格式自由切换，内置图片查看器支持图片全屏缩放、平移与旋转预览。
-- 🪟 **独立便签**：支持将任意便签打开为无边框独立窗口，并可按需保持窗口置顶。
-- 🎨 **个性化定制**：内置设置中心，支持自定义卡片外观、页面布局与默认格式等多种偏好设置，并支持平滑置顶与亮暗主题自适应。
-- 💡 **超级面板**：完美集成 uTools 超级面板，支持划词一键捕获文本极速生成卡片。
-- ⌨️ **快捷键操作**：支持自定义全局快捷键（如一键唤起、快捷新建、聚焦搜索框等）以及卡片编辑的快捷键操作。
-- 🔄 **备份与同步**：支持全局 JSON 备份、选择性导入导出和基本结构校验，在 uTools 环境下使用平台存储能力同步数据。
-- 🏷️ **标签交互**：支持卡片标签快速管理，点击标签可直接复制标签内容。
+| 核心特性 | 原版 (Upstream) | 增强版 (This Fork) |
+| :--- | :--- | :--- |
+| **云端数据同步** | 仅依赖 uTools 账号体系 | 🚀 **原生 WebDAV 云同步**（坚果云 / Nextcloud / 群晖 NAS / AList 等） |
+| **多端冲突解决** | 平台内部简单覆盖 | 🛡️ **分布式墓碑合并算法 (Tombstone)**，彻底根治单端删除后幽灵复活 |
+| **桌面独立运行** | 仅限 uTools 插件内运行 | 🪟 **支持 Script Kit 桌面悬浮窗**（无边框圆角、流体拖拽、常驻单例） |
+| **浏览器独立运行** | 缺少部分离线降级 | 🌐 **标准 Web 环境零依赖运行**（支持任意现代浏览器直接打开） |
+| **分发与自动化** | 手动打包 `.upx` | 🤖 **GitHub Actions CI/CD 自动编译**，Release 资产秒级自动拉取 |
 
 ---
 
-## 🔌 uTools API 适配
+## 🌈 功能亮点
 
-在 `src/utils/storage.ts` 中封装了统一的适配层：
-- **数据持久化**：在 uTools 环境下使用 `dbStorage`；用户启用 uTools 数据同步后可跨设备同步，浏览器环境下自动退化到 `localStorage`。
-- **系统主题贴合**：进入 uTools 插件时调用 API 读取系统主题并应用，浏览器环境下跟随系统偏好。
-- **本地写盘**：复用 Preload 底层服务进行静默安全的 JSON 导入导出。
+### ☁️ 1. WebDAV 智能云同步引擎 (Tombstone Sync Engine)
+- **通用支持**：原生支持坚果云、Nextcloud、OwnCloud、群晖 NAS、AList、InfiniCLOUD 等所有标准 WebDAV 服务器；
+- **墓碑机制 (Tombstone)**：采用分布式数据同步的工业级标准，删除操作带有 `deletedAt` 墓碑标记，跨设备双向同步时自动比对时间戳进行状态裁决，**彻底杜绝单设备删除后便签再次复活的问题**；
+- **智能自愈与冲突保护**：若某设备在删除后重新进行了修改，算法自动裁决恢复并保留最新编辑；
+- **灵活的备份与恢复选项**：支持“双向智能同步”、“覆盖推送到云端 (Force Push)”以及“从云端强制拉取覆盖 (Force Pull)”。
 
----
+### 🪟 2. Script Kit 桌面极速悬浮窗集成
+- **0ms 秒开秒隐**：常驻后台守护，按快捷键 <kbd>Alt</kbd> + <kbd>N</kbd> 瞬间呼出，按 <kbd>Esc</kbd> 极速隐藏；
+- **单例互斥锁保护**：内置 HTTP 本地单例互斥调度，无论触发多少次快捷键永远保持单一窗口实例，杜绝重复创建；
+- **高颜值 Fluent 视觉**：16px 纯净圆角、亚克力磨砂玻璃质感，杜绝 Windows DWM 渲染黑边；
+- **原生极速拖拽**：顶栏原生系统级拖拽，按钮与搜索框防误触穿透隔离，多显示器窗口坐标防抖记忆。
 
-## 🧭 架构概览
-
-项目采用“功能模块 + Pinia Store + 领域规则 + 基础设施适配”的分层方式：
-
-- **界面模块**：`src/modules/` 按 ActionBar、CategorySidebar、NoteCard、SettingsModal 和 DataModal 拆分功能界面。
-- **共享组件**：`src/components/` 放置跨模块复用的弹窗、Toast、Popover 和预览组件。
-- **状态层**：`noteStore`、`categoryStore` 和 `uiStore` 分别管理便签、分类和界面偏好；`stickyNotes` 负责跨 Store 初始化、备份恢复和统一 facade 暴露。
-- **领域层**：`src/domain/` 提供命令、事件总线、快捷键、过滤流水线、设置定义和双击动作注册表等与 UI 解耦的规则。
-- **基础设施层**：`src/infrastructure/storage/` 提供分类、便签、备份和设置仓储；`src/utils/storage.ts` 负责 uTools 与浏览器存储环境适配。
-- **设置扩展**：设置界面元数据位于 `src/modules/SettingsModal/settingsConfig.ts`；默认值、合法值、Codec 和持久化由 `SettingDefinition`、`SettingRepository` 与领域注册表提供。
-
-新增双击动作时，应优先修改 `src/domain/noteInteractions/DoubleClickNoteActionRegistry.ts` 并补充测试，避免在组件、启动加载和备份恢复流程中重复维护动作值。
+### 📝 3. 原版经典体验全量保留
+- **双击快捷动作**：非编辑状态下双击卡片可触发“复制并粘贴到光标处”、“全屏沉浸查看”等；
+- **无限层级分类**：支持多级分类与自由排序，配备“最近使用”与“最近删除”回收站；
+- **Markdown & 富文本**：支持纯文本与 Markdown 自由切换，内置图片全屏缩放旋转查看器；
+- **全局多维搜索**：支持空格分隔多关键词及标题/内容/标签范围筛选。
 
 ---
 
-## 🛠️ 本地开发与调试
+## 🛠️ 快速上手与运行方式
+
+### 方式一：在 Script Kit 中运行 (推荐桌面端使用)
+只需将启动脚本 [`moment-notes.js`](./moment-notes.js) 放入您的 `~/.kenv/scripts/` 目录：
+1. 按下 <kbd>Alt</kbd> + <kbd>N</kbd>；
+2. 脚本将自动检测本地组件，若为首次运行会自动从 GitHub Releases 下载最新的 `dist.zip` 预编译包并极速解压启动；
+3. 进入设置面板 ➔ 打开 **WebDAV 同步** ➔ 填入您的云盘地址与授权密码即可开启多端实时同步！
+
+### 方式二：在独立 Web 浏览器中运行
+直接双击打开编译生成的 `dist/index.html` 或通过任意静态 Web 服务器访问。
+
+### 方式三：在 uTools 中作为插件运行
+1. 呼出 uTools，搜索 **开发者工具**；
+2. 点击 **新建项目**，选择本项目根目录下的 `public/plugin.json`；
+3. 即可在 uTools 沙箱环境中作为便签插件运行。
+
+---
+
+## 💻 本地开发与构建
 
 ### 1. 安装依赖
 ```bash
@@ -58,78 +69,14 @@ npm install
 ```bash
 npm run dev
 ```
-启动后，本地预览地址为：`http://localhost:4021/`。
 
-### 3. 在 uTools 中调试
-1. 呼出 `uTools`，搜索并进入 **开发者工具**。
-2. 点击 **新建项目**，选择项目根目录下的 `public/plugin.json`。
-3. 确保本地 `npm run dev` 正常运行，在开发者工具中点击 **运行** 即可进行沙箱调试。
-
-使用浏览器进行功能验证时，默认访问 `http://localhost:4021/`；测试结束后请关闭浏览器并清理临时快照。
-
-### 4. 代码规范、测试与 Git 提交规范
-为了确保代码质量与风格一致，本项目集成了 Husky, ESLint 和 commitlint：
-**代码格式化与校验**：在提交前，请运行以下命令：
+### 3. 本地构建并同步到 Script Kit
 ```bash
-npm run lint:nocache
-npx vue-tsc --noEmit
-npm test
-```
-`npm run lint` 和 `npm run lint:nocache` 会自动修复 ESLint 格式问题；类型检查使用 `vue-tsc`，测试使用 Vitest。
-**Git 提交信息**：提交信息须遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范，格式为 `<type>(<scope>): <subject>`，例如：
-- `feat: 新增便签多色主题选择`
-- `fix: 修复置顶便签重排时的动画卡顿问题`
-
----
-
-## 📦 打包与发布
-
-1. **打包项目**：
-```bash
-npm run build
-```
-打包完成后，会在根目录下生成 `dist/` 目录。
-
-2. **打包 UPX**：
-在 `uTools 开发者工具` 项目面板中点击 **打包项目**，选择生成的 `dist/` 目录和 `public/` 下的图标，生成 `.upx` 格式的插件包，上传至 uTools 开放平台审核即可。
-
----
-
-## 📂 项目结构
-
-```text
-moment-notes/
-├── .github/          # GitHub 工作流配置
-├── .utools/          # uTools 开发者配置
-├── docs/             # 项目文档及预览图
-├── public/           # 静态资源及 uTools 插件配置文件 (plugin.json)
-├── src/
-│   ├── components/   # 跨模块复用的 UI 组件
-│   ├── domain/       # 领域规则：命令、事件、快捷键、流水线、注册表
-│   ├── infrastructure/  # 基础设施：存储仓储与备份 Codec
-│   ├── modules/      # 按功能拆分的界面模块
-│   ├── stores/       # Pinia Store 与跨 Store 协调 facade
-│   ├── styles/       # 全局样式、SCSS 变量与 Mixins
-│   ├── types/        # TypeScript 类型定义
-│   ├── utils/        # 平台适配与通用工具 (storage、tooltip 等)
-│   ├── views/        # 页面级视图 (Dashboard)
-│   ├── App.vue       # 应用入口与 uTools 生命周期接入
-│   └── main.ts       # Vue、Pinia 和全局 Tooltip 初始化
-├── vite.config.ts    # Vite 构建配置
-└── tsconfig.json     # TypeScript 配置
+npm run sync:kenv
 ```
 
 ---
 
-## 🤝 参与贡献
+## 📄 开源许可证
 
-如果你发现了 Bug 或者有更好的功能建议，欢迎提交 **Issue** 或发起 **Pull Request**！
-在提 PR 前，请确保：
-1. 你的代码已经通过 `npm run lint:nocache`、`npx vue-tsc --noEmit` 和 `npm test`。
-2. 保持组件行数在合理范围内，若组件逻辑较复杂，建议合理拆分出子组件或 Composable 函数。
-
----
-
-## 📄 开源协议
-
-本项目采用 **MIT License** 开源协议。详情请参阅 [LICENSE](LICENSE) 文件。
+本项目基于 MIT License 协议开源，感谢原作者 [LingLingDayo](https://github.com/LingLingDayo) 的优秀开源贡献！
