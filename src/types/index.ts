@@ -6,6 +6,9 @@ export interface Category {
   id: string;
   name: string;
   createdAt: number;
+  updatedAt?: number;
+  isDeleted?: boolean;
+  deletedAt?: number;
   parentId?: string;
 }
 
@@ -97,4 +100,19 @@ export interface ImportOptions {
   categoryIds: string[];
   importUncategorized: boolean;
   importSettings: boolean;
+}
+
+export type WebdavSyncState = 'idle' | 'syncing' | 'success' | 'error';
+
+export interface WebdavConfig {
+  enabled: boolean;
+  serverUrl: string;
+  username: string;
+  password: string;
+  remotePath: string;
+  autoSync: boolean;
+  syncIntervalMinutes: number;
+  lastSyncStatus?: WebdavSyncState;
+  lastSyncTime?: number;
+  lastSyncMessage?: string;
 }

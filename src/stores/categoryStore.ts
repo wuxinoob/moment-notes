@@ -41,7 +41,8 @@ export const useCategoryStore = defineStore('categoryStore', () => {
     const descendants = new Set<string>();
     const childrenMap = new Map<string, string[]>();
 
-    categories.value.forEach(c => {
+    const activeCategories = categories.value.filter(c => !c.isDeleted);
+    activeCategories.forEach(c => {
       if (c.parentId) {
         if (!childrenMap.has(c.parentId)) {
           childrenMap.set(c.parentId, []);
@@ -66,11 +67,12 @@ export const useCategoryStore = defineStore('categoryStore', () => {
   };
 
   const orderedCategories = computed(() => {
-    const catMap = new Map(categories.value.map(c => [c.id, c]));
+    const activeCategories = categories.value.filter(c => !c.isDeleted);
+    const catMap = new Map(activeCategories.map(c => [c.id, c]));
     const childrenMap = new Map<string, Category[]>();
     const rootCategories: Category[] = [];
 
-    categories.value.forEach(c => {
+    activeCategories.forEach(c => {
       if (c.parentId && catMap.has(c.parentId)) {
         if (!childrenMap.has(c.parentId)) {
           childrenMap.set(c.parentId, []);
@@ -237,10 +239,13 @@ export const useCategoryStore = defineStore('categoryStore', () => {
 
   const addCategory = (name: string, parentId?: string): Category | undefined => {
     if (!name.trim()) return;
+    const now = Date.now();
     const newCategory: Category = {
-      id: Date.now().toString(),
+      id: now.toString(),
       name: name.trim(),
-      createdAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
+      isDeleted: false,
       parentId
     };
     categories.value.push(newCategory);
@@ -254,15 +259,21 @@ export const useCategoryStore = defineStore('categoryStore', () => {
   };
 
   const deleteCategory = (id: string) => {
-    const targetParentId = categories.value.find(c => c.id === id)?.parentId;
-    categories.value = categories.value
-      .map(c => {
-        if (c.parentId === id) {
-          return { ...c, parentId: targetParentId };
-        }
-        return c;
-      })
-      .filter(c => c.id !== id);
+    const now = Date.now();
+    const targetCat = categories.value.find(c => c.id === id);
+    if (targetCat) {
+      targetCat.isDeleted = true;
+      targetCat.deletedAt = now;
+      targetCat.updatedAt = now;
+    }
+
+    const targetParentId = targetCat?.parentId;
+    categories.value.forEach(c => {
+      if (c.parentId === id) {
+        c.parentId = targetParentId;
+        c.updatedAt = now;
+      }
+    });
     saveCategories();
 
     categoryOrder.value = categoryOrder.value.filter(itemId => itemId !== id);
@@ -276,6 +287,7 @@ export const useCategoryStore = defineStore('categoryStore', () => {
     const category = categories.value.find(c => c.id === id);
     if (category) {
       category.name = name.trim();
+      category.updatedAt = Date.now();
       saveCategories();
       eventBus.emit('CATEGORY_UPDATED', category);
     }
@@ -285,13 +297,15 @@ export const useCategoryStore = defineStore('categoryStore', () => {
     const list: Array<{ label: string; value: string }> = [];
     list.push({ label: '全部便签', value: 'all' });
 
+    const activeCategories = categories.value.filter(c => !c.isDeleted);
+
     const getCategoryPath = (catId: string): string => {
       const path: string[] = [];
-      let current = categories.value.find(c => c.id === catId);
+      let current = activeCategories.find(c => c.id === catId);
       while (current) {
         path.unshift(current.name);
         const parentId = current.parentId;
-        current = parentId ? categories.value.find(c => c.id === parentId) : undefined;
+        current = parentId ? activeCategories.find(c => c.id === parentId) : undefined;
       }
       return path.join(' / ');
     };
@@ -304,10 +318,10 @@ export const useCategoryStore = defineStore('categoryStore', () => {
       return getOrderIndex(a.id) - getOrderIndex(b.id);
     };
 
-    const catMap = new Map(categories.value.map(c => [c.id, { ...c, children: [] as any[] }]));
+    const catMap = new Map(activeCategories.map(c => [c.id, { ...c, children: [] as any[] }]));
     const rootCategories: any[] = [];
 
-    categories.value.forEach(c => {
+    activeCategories.forEach(c => {
       const item = catMap.get(c.id);
       if (item) {
         if (c.parentId && catMap.has(c.parentId)) {
