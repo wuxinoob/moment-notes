@@ -6,13 +6,15 @@ import { useUiStore } from './uiStore';
 import { COLOR_PRESETS } from './colorPresets';
 import * as helpers from './stickyNotesHelpers';
 import { storage, pasteTextToCursor } from '@utils/storage';
-import { Note, NoteType, ExportOptions, ImportOptions } from '@type';
+import { Note, NoteType, ExportOptions, ImportOptions, BackupData } from '@type';
 import { useShortcutStore } from './shortcutStore';
 import { getDefaultCategories } from './defaultData';
 import { getCurrentSettings, applySettings } from './settingsHelper';
 import { getFilteredAndSortedNotes, normalizeCategoryOrder } from './stickyNotesAlgorithms';
 import { commandRegistry } from '../domain/commands/CommandRegistry';
 import { categoryRepository, noteRepository } from '../infrastructure/storage/Repository';
+import { webdavSyncEngine } from '../infrastructure/sync/WebdavSyncEngine';
+import { eventBus } from '../domain/events/DomainEventBus';
 
 export { COLOR_PRESETS };
 
@@ -214,9 +216,78 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
         noteStore.allNotes,
         getCurrentSettings(uiStore, noteStore, useShortcutStore(), categoryStore)
       );
+
+      // 初始化 WebDAV 调度器与自动同步
+      webdavSyncEngine.initScheduler(getCurrentBackupData, applyMergedBackupData);
+      hookDomainEventsForSync();
+
+      if (webdavSyncEngine.config.value.enabled && webdavSyncEngine.config.value.autoSync) {
+        syncWithWebdav({ silent: false }).catch(() => {});
+      }
     } catch (e) {
       console.error('Failed to load sticky notes data:', e);
     }
+  };
+
+  // 监听领域事件，便签与分类编辑保存后 3 秒自动防抖推送
+  let isEventHooked = false;
+  const hookDomainEventsForSync = () => {
+    if (isEventHooked) return;
+    isEventHooked = true;
+    const triggerAutoPush = () => {
+      webdavSyncEngine.triggerDebouncedPush(getCurrentBackupData, applyMergedBackupData, 3000);
+    };
+    const syncEvents = [
+      'NOTE_CREATED', 'NOTE_UPDATED', 'NOTE_DELETED', 'NOTE_RESTORED',
+      'CATEGORY_CREATED', 'CATEGORY_UPDATED', 'CATEGORY_DELETED'
+    ] as const;
+    syncEvents.forEach(evt => eventBus.subscribe(evt, triggerAutoPush));
+  };
+
+  /**
+   * 获取当前全量数据快照 (用于导出与 WebDAV 同步)
+   */
+  const getCurrentBackupData = (): BackupData => {
+    const shortcutStore = useShortcutStore();
+    const settings = getCurrentSettings(uiStore, noteStore, shortcutStore, categoryStore);
+    return {
+      version: '1.7.0',
+      timestamp: Date.now(),
+      categories: categoryStore.categories,
+      notes: noteStore.allNotes,
+      settings
+    };
+  };
+
+  /**
+   * 应用合并后的数据 (从 WebDAV 拉取后刷新本地 Store)
+   */
+  const applyMergedBackupData = (data: BackupData) => {
+    if (data.categories && data.categories.length > 0) {
+      categoryStore.categories = data.categories;
+      categoryStore.saveCategories();
+    }
+    if (data.notes) {
+      noteStore.allNotes = data.notes;
+      noteStore.saveNotes();
+      noteStore.loadNotesForCurrentCategory();
+    }
+    if (data.settings) {
+      const shortcutStore = useShortcutStore();
+      applySettings(data.settings, uiStore, noteStore, shortcutStore, categoryStore);
+    }
+  };
+
+  /**
+   * 执行 WebDAV 云端同步 (支持智能双向墓碑合并、强制推送与强制拉取)
+   */
+  const syncWithWebdav = async (options?: boolean | { forcePush?: boolean; forcePull?: boolean; silent?: boolean }) => {
+    const opts = typeof options === 'boolean' ? { forcePush: options } : (options || {});
+    return await webdavSyncEngine.performSync(
+      getCurrentBackupData,
+      applyMergedBackupData,
+      opts
+    );
   };
 
   const reloadNotes = () => {
@@ -393,15 +464,11 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     helpers.devResetNotes(toRef(noteStore, 'allNotes'), noteStore.saveNotes, uiStore.showToast);
     noteStore.loadNotesForCurrentCategory();
   };
-
   const devResetTags = () => {
     helpers.devResetTags(toRef(noteStore, 'allNotes'), noteStore.saveNotes, uiStore.showToast);
     noteStore.loadNotesForCurrentCategory();
   };
-
-  const devResetAllData = () => {
-    helpers.devResetAllData(loadData, gridColumnsRef, uiStore.showToast);
-  };
+  const devResetAllData = () => helpers.devResetAllData(loadData, gridColumnsRef, uiStore.showToast);
 
   return {
     categories: categoriesRef,
@@ -509,6 +576,10 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     pendingImportData: toRef(uiStore, 'pendingImportData'),
     openImportModal: uiStore.openImportModal,
     closeImportModal: uiStore.closeImportModal,
+
+    syncWithWebdav,
+    getCurrentBackupData,
+    applyMergedBackupData,
 
     isInitialized: readonly(isInitialized),
     loadData,

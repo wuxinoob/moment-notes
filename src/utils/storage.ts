@@ -22,7 +22,10 @@ export const storage = {
         console.error('uTools dbStorage.getItem error, falling back to localStorage:', e);
       }
     }
-    return localStorage.getItem(key);
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(key);
+    }
+    return null;
   },
 
   setItem(key: string, value: string): void {
@@ -34,7 +37,9 @@ export const storage = {
         console.error('uTools dbStorage.setItem error, falling back to localStorage:', e);
       }
     }
-    localStorage.setItem(key, value);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, value);
+    }
   },
 
   removeItem(key: string): void {
@@ -46,7 +51,9 @@ export const storage = {
         console.error('uTools dbStorage.removeItem error, falling back to localStorage:', e);
       }
     }
-    localStorage.removeItem(key);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(key);
+    }
   }
 };
 
