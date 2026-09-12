@@ -276,18 +276,9 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   backdrop-filter: blur(10px);
   transition: all 0.3s ease;
 
-  &.success {
-    border-color: rgba(34, 197, 94, 0.35);
-    background: rgba(34, 197, 94, 0.08);
-  }
-  &.error {
-    border-color: rgba(239, 68, 68, 0.35);
-    background: rgba(239, 68, 68, 0.08);
-  }
-  &.syncing {
-    border-color: rgba(59, 130, 246, 0.35);
-    background: rgba(59, 130, 246, 0.08);
-  }
+  &.success { border-color: rgba(34, 197, 94, 0.35); background: rgba(34, 197, 94, 0.08); }
+  &.error { border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); }
+  &.syncing { border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); }
 
   .status-left {
     display: flex;
@@ -314,16 +305,8 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
     display: flex;
     flex-direction: column;
     gap: 2px;
-
-    .status-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .status-sub {
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
+    .status-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    .status-sub { font-size: 12px; color: var(--text-secondary); }
   }
 
   .sync-now-btn {
@@ -391,33 +374,56 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   display: inline-block;
   width: 44px;
   height: 24px;
+  cursor: pointer;
+  user-select: none;
 
-  input { opacity: 0; width: 0; height: 0; }
+  input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+  }
+
   .slider {
     position: absolute;
-    cursor: pointer;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background-color: rgba(255, 255, 255, 0.2);
-    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--btn-bg, rgba(120, 120, 128, 0.16));
+    border: 1px solid var(--btn-border, rgba(120, 120, 128, 0.24));
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
     border-radius: 24px;
+    box-sizing: border-box;
 
     &:before {
       position: absolute;
       content: "";
-      height: 18px;
-      width: 18px;
+      height: 16px;
+      width: 16px;
       left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      top: 3px;
+      background-color: var(--text-secondary, #94a3b8);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+      transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
       border-radius: 50%;
     }
   }
 
+  &:hover .slider {
+    background: var(--btn-hover-bg, rgba(120, 120, 128, 0.24));
+    border-color: var(--btn-hover-border, rgba(120, 120, 128, 0.36));
+  }
+
   input:checked + .slider {
-    background-color: #3b82f6;
+    background: var(--accent-color, #6366f1);
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+
     &:before {
       transform: translateX(20px);
+      background-color: #ffffff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
     }
   }
 }
@@ -436,16 +442,8 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   display: flex;
   flex-direction: column;
   gap: 6px;
-
-  .field-label {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-  .field-hint {
-    font-size: 11px;
-    color: var(--text-secondary);
-  }
+  .field-label { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .field-hint { font-size: 11px; color: var(--text-secondary); }
 }
 
 .field-row-double {
@@ -459,16 +457,15 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   padding: 8px 12px;
   font-size: 13px;
   color: var(--text-primary);
-  background: rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--input-bg, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--input-border, rgba(120, 120, 128, 0.2));
   border-radius: 8px;
   outline: none;
   box-sizing: border-box;
   transition: all 0.2s ease;
-
   &:focus {
-    border-color: #3b82f6;
-    background: rgba(0, 0, 0, 0.25);
+    border-color: var(--accent-color, #6366f1);
+    background: var(--input-focus-bg, rgba(0, 0, 0, 0.15));
   }
 }
 
@@ -476,10 +473,7 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   position: relative;
   display: flex;
   align-items: center;
-
-  .pwd-input {
-    padding-right: 36px;
-  }
+  .pwd-input { padding-right: 36px; }
   .eye-btn {
     position: absolute;
     right: 8px;
@@ -491,7 +485,6 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
     align-items: center;
     justify-content: center;
     padding: 4px;
-
     &:hover { color: var(--text-primary); }
     .eye-icon { width: 16px; height: 16px; }
   }
@@ -505,29 +498,13 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.2);
   border-radius: 8px;
-
-  .shield-icon {
-    width: 18px;
-    height: 18px;
-    color: #3b82f6;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
+  .shield-icon { width: 18px; height: 18px; color: #3b82f6; flex-shrink: 0; margin-top: 2px; }
   .info-content {
     display: flex;
     flex-direction: column;
     gap: 2px;
-
-    .info-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: #3b82f6;
-    }
-    .info-desc {
-      font-size: 11px;
-      color: var(--text-secondary);
-      line-height: 1.4;
-    }
+    .info-title { font-size: 12px; font-weight: 600; color: #3b82f6; }
+    .info-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
   }
 }
 
@@ -536,7 +513,6 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 4px;
-
   .tool-btn {
     display: flex;
     align-items: center;
@@ -549,15 +525,9 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
     cursor: pointer;
     transition: all 0.2s ease;
     border: 1px solid transparent;
-
     .btn-icon { width: 14px; height: 14px; }
-    &:hover:not(:disabled) {
-      transform: translateY(-1px);
-    }
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
+    &:hover:not(:disabled) { transform: translateY(-1px); }
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
 
     &.test-btn {
       background: rgba(255, 255, 255, 0.08);
@@ -607,12 +577,6 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
   .res-icon { width: 16px; height: 16px; flex-shrink: 0; }
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>
