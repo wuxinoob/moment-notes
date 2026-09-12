@@ -122,6 +122,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  -webkit-app-region: drag;
+  user-select: none;
 
   .logo {
     width: 30px;
@@ -140,6 +142,7 @@ onUnmounted(() => {
 
 .sidebar-footer {
   padding: 16px 12px;
+  -webkit-app-region: no-drag !important;
   // border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -212,6 +215,7 @@ onUnmounted(() => {
   background: transparent;
   display: flex;
   justify-content: center;
+  -webkit-app-region: no-drag !important;
 
   &::after {
     content: '';

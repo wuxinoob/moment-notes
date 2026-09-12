@@ -148,6 +148,7 @@ onUnmounted(() => {
   align-items: center;
   flex: 1;
   max-width: 320px;
+  -webkit-app-region: no-drag !important;
 }
 
 .search-wrapper {
