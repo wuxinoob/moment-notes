@@ -1,10 +1,11 @@
 import { markRaw } from 'vue';
-import { Sun, Moon, Columns, Settings, Database, Info, Trash2, Keyboard } from '@lucide/vue';
+import { Sun, Moon, Columns, Settings, Database, Info, Trash2, Keyboard, Cloud } from '@lucide/vue';
 import {
   DOUBLE_CLICK_NOTE_ACTIONS,
   DOUBLE_CLICK_NOTE_ACTION_SETTING
 } from '../../domain/noteInteractions/DoubleClickNoteActionRegistry';
 import DataPanel from './DataPanel.vue';
+import WebdavPanel from './WebdavPanel.vue';
 import AboutPanel from './AboutPanel.vue';
 
 
@@ -378,6 +379,20 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         type: 'component',
         desc: '导出备份能将当前所有的便签及分类列表转换为备份文件；导入恢复能从 JSON 备份中加载数据。',
         component: markRaw(DataPanel)
+      }
+    ]
+  },
+  {
+    id: 'webdav',
+    title: 'WebDAV 云同步',
+    tabTitle: '云端同步',
+    icon: markRaw(Cloud),
+    items: [
+      {
+        key: 'webdavSettings',
+        label: '',
+        type: 'component',
+        component: markRaw(WebdavPanel)
       }
     ]
   },

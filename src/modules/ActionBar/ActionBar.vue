@@ -1,8 +1,9 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useStickyNotesStore } from '@stores/stickyNotes';
-import { Plus, Trash2, Sun, Moon } from '@lucide/vue';
+import { Plus, Trash2, Sun, Moon, Cloud, RefreshCw } from '@lucide/vue';
 import { isUTools } from '@utils/storage';
+import { webdavSyncEngine } from '../../infrastructure/sync/WebdavSyncEngine';
 import SearchSection from './SearchSection.vue';
 import SortPopover from './SortPopover.vue';
 import GridColumnsPopover from './GridColumnsPopover.vue';
@@ -27,6 +28,30 @@ const clearTooltip = computed(() => {
   }
   return store.currentCategoryId === 'all' ? '清空所有便签' : '清空当前分类便签';
 });
+
+const webdavConfig = webdavSyncEngine.config;
+const webdavSyncState = webdavSyncEngine.syncState;
+
+const webdavTooltip = computed(() => {
+  if (!webdavConfig.value.enabled) return 'WebDAV 未启用 (前往设置开启)';
+  if (webdavSyncState.value === 'syncing') return '正在同步中...';
+  if (webdavSyncState.value === 'error') return `同步异常: ${webdavConfig.value.lastSyncMessage || '点击重试'}`;
+  const timeStr = webdavConfig.value.lastSyncTime ? new Date(webdavConfig.value.lastSyncTime).toLocaleTimeString() : '尚未同步';
+  return `WebDAV 已就绪 (上次同步: ${timeStr}，点击立即同步)`;
+});
+
+const handleWebdavSync = async () => {
+  if (!webdavConfig.value.enabled) {
+    store.openSettings();
+    return;
+  }
+  const res = await store.syncWithWebdav();
+  if (res.success) {
+    store.showToast('✅ WebDAV 同步成功！');
+  } else {
+    store.showToast(`❌ ${res.message}`);
+  }
+};
 
 // 初始化主题与事件监听
 onMounted(() => {
@@ -84,6 +109,19 @@ const handleAddNote = () => {
 
     <!-- 按钮操作区 -->
     <div class="actions-wrapper">
+      <!-- WebDAV 云同步快捷按钮 -->
+      <button
+        v-if="webdavConfig.enabled"
+        class="icon-btn webdav-sync-btn"
+        :class="webdavSyncState"
+        :data-tooltip="webdavTooltip"
+        :disabled="webdavSyncState === 'syncing'"
+        @click="handleWebdavSync"
+      >
+        <RefreshCw v-if="webdavSyncState === 'syncing'" class="btn-icon spin" />
+        <Cloud v-else class="btn-icon" />
+      </button>
+
       <!-- 切换主题 -->
       <button
         v-if="store.enabledActionBarButtons.includes('theme-toggle')"
@@ -204,9 +242,26 @@ const handleAddNote = () => {
     }
   }
 
+  &.webdav-sync-btn {
+    &.syncing {
+      color: #3b82f6;
+      border-color: rgba(59, 130, 246, 0.4);
+    }
+    &.success {
+      color: #22c55e;
+    }
+    &.error {
+      color: #ef4444;
+    }
+  }
+
   .btn-icon {
     width: 16px;
     height: 16px;
+  }
+
+  .spin {
+    animation: spin 1s linear infinite;
   }
 
   &.active {
@@ -214,6 +269,11 @@ const handleAddNote = () => {
     border-color: rgba(99, 102, 241, 0.25);
     background: var(--accent-light);
   }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .primary-btn {
