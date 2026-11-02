@@ -8,6 +8,8 @@ import { COLOR_PRESETS } from './colorPresets';
 import { SearchTarget } from './stickyNotesAlgorithms';
 import { noteRepository } from '../infrastructure/storage/Repository';
 import { eventBus } from '../domain/events/DomainEventBus';
+import { imageLifecycleService } from '../infrastructure/sync/ImageLifecycleService';
+import { webdavSyncEngine, WebdavClient } from '../infrastructure/sync/WebdavSyncEngine';
 
 export const useNoteStore = defineStore('noteStore', () => {
   const allNotes = ref<Note[]>([]);
@@ -28,11 +30,11 @@ export const useNoteStore = defineStore('noteStore', () => {
 
     let result = allNotesList;
     if (categoryId === 'trash') {
-      result = result.filter(n => n.isDeleted === true);
+      result = result.filter(n => n.isDeleted === true && !n.isPurged);
     } else if (categoryId === 'recent') {
-      result = result.filter(n => n.isDeleted !== true && n.lastUsedAt !== undefined);
+      result = result.filter(n => n.isDeleted !== true && !n.isPurged && n.lastUsedAt !== undefined);
     } else {
-      result = result.filter(n => n.isDeleted !== true);
+      result = result.filter(n => n.isDeleted !== true && !n.isPurged);
       if (categoryId !== 'all') {
         const descendants = categoryStore.getCategoryDescendants(categoryId);
         result = result.filter(
@@ -43,20 +45,9 @@ export const useNoteStore = defineStore('noteStore', () => {
     notes.value = result;
   };
 
-  const loadNotesForCurrentCategory = (immediate = false) => {
-    if (immediate) {
-      syncCurrentCategoryNotes();
-      isLoadingNotes.value = false;
-      return;
-    }
-
-    isLoadingNotes.value = true;
-    notes.value = [];
-
-    setTimeout(() => {
-      syncCurrentCategoryNotes();
-      isLoadingNotes.value = false;
-    }, 0);
+  const loadNotesForCurrentCategory = (_immediate = true) => {
+    syncCurrentCategoryNotes();
+    isLoadingNotes.value = false;
   };
 
   const applyCategoryViewSettings = (categoryId: string) => {
@@ -122,7 +113,7 @@ export const useNoteStore = defineStore('noteStore', () => {
     }
     const finalType = type || uiStore.defaultNoteType || 'text';
     const newNote: Note = {
-      id: Date.now().toString(),
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       categoryId,
       title: title.trim(),
       content: content,
@@ -148,7 +139,8 @@ export const useNoteStore = defineStore('noteStore', () => {
     if (!note) return;
 
     if (note.isDeleted) {
-      allNotes.value = allNotes.value.filter(n => n.id !== id);
+      note.isPurged = true;
+      note.purgedAt = Date.now();
       eventBus.requestToast('已彻底删除便签', 'success');
     } else {
       note.isDeleted = true;
@@ -165,7 +157,9 @@ export const useNoteStore = defineStore('noteStore', () => {
     const note = allNotes.value.find(n => n.id === id);
     if (note) {
       note.isDeleted = false;
+      note.isPurged = false;
       delete note.deletedAt;
+      delete note.purgedAt;
       note.updatedAt = Date.now();
       saveNotes();
       syncCurrentCategoryNotes();
@@ -175,17 +169,31 @@ export const useNoteStore = defineStore('noteStore', () => {
   };
 
   const clearTrash = () => {
-    allNotes.value = allNotes.value.filter(n => n.isDeleted !== true);
+    const now = Date.now();
+    allNotes.value.forEach(n => {
+      if (n.isDeleted && !n.isPurged) {
+        n.isPurged = true;
+        n.purgedAt = now;
+      }
+    });
     saveNotes();
     syncCurrentCategoryNotes();
     eventBus.requestToast('已清空最近删除的所有便签', 'success');
+
+    // 异步触发孤儿图片垃圾回收
+    const cfg = webdavSyncEngine.config.value;
+    const client = cfg.enabled ? new WebdavClient(cfg) : undefined;
+    imageLifecycleService.performImageGC(allNotes.value, client, {
+      gracePeriodDays: 7,
+      remoteDir: cfg.imagesRemoteDir || '/toolkit/moment_notes_images'
+    }).catch(e => console.warn('[NoteStore] Image GC error:', e));
   };
 
   const trashNotesCount = ref(0);
   watch(
     () => allNotes.value,
     (notesList) => {
-      trashNotesCount.value = notesList.filter(n => n.isDeleted === true).length;
+      trashNotesCount.value = notesList.filter(n => n.isDeleted === true && !n.isPurged).length;
     },
     { deep: true, immediate: true }
   );
@@ -210,7 +218,7 @@ export const useNoteStore = defineStore('noteStore', () => {
   const clearNotes = (categoryId: string, descendants?: Set<string>) => {
     if (categoryId === 'all') {
       allNotes.value.forEach(n => {
-        if (!n.isDeleted) {
+        if (!n.isDeleted && !n.isPurged) {
           n.isDeleted = true;
           n.deletedAt = Date.now();
           n.isPinned = false;
@@ -223,7 +231,7 @@ export const useNoteStore = defineStore('noteStore', () => {
       allNotes.value.forEach(n => {
         if (
           (n.categoryId === categoryId || (descendants && descendants.has(n.categoryId))) &&
-          !n.isDeleted
+          !n.isDeleted && !n.isPurged
         ) {
           n.isDeleted = true;
           n.deletedAt = Date.now();
@@ -257,10 +265,16 @@ export const useNoteStore = defineStore('noteStore', () => {
     storage.setItem('sticky_notes_sort_order', sortOrder.value);
   };
 
+  let lastMoveTime = 0;
+
   const moveNote = (draggedId: string, targetId: string) => {
+    const now = Date.now();
+    if (now - lastMoveTime < 100) {
+      return;
+    }
     const fromIndex = notes.value.findIndex(n => n.id === draggedId);
     const toIndex = notes.value.findIndex(n => n.id === targetId);
-    if (fromIndex !== -1 && toIndex !== -1) {
+    if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
       const fromNote = notes.value[fromIndex];
       const toNote = notes.value[toIndex];
       if (fromNote.isPinned === toNote.isPinned) {
@@ -280,13 +294,37 @@ export const useNoteStore = defineStore('noteStore', () => {
 
         const allFromIndex = allNotes.value.findIndex(n => n.id === draggedId);
         const allToIndex = allNotes.value.findIndex(n => n.id === targetId);
-        if (allFromIndex !== -1 && allToIndex !== -1) {
+        if (allFromIndex !== -1 && allToIndex !== -1 && allFromIndex !== allToIndex) {
           const [movedAllNote] = allNotes.value.splice(allFromIndex, 1);
           allNotes.value.splice(allToIndex, 0, movedAllNote);
         }
+        lastMoveTime = now;
         saveNotes();
       }
     }
+  };
+
+  const solidifyCurrentOrderAsCustom = (orderedList?: Note[]) => {
+    const listToSolidify = orderedList || notes.value;
+    if (listToSolidify.length > 0) {
+      const idOrder = new Map(listToSolidify.map((n, i) => [n.id, i]));
+
+      notes.value = [...notes.value].sort((a, b) => {
+        const idxA = idOrder.get(a.id) ?? 999999;
+        const idxB = idOrder.get(b.id) ?? 999999;
+        return idxA - idxB;
+      });
+
+      allNotes.value = [...allNotes.value].sort((a, b) => {
+        const idxA = idOrder.get(a.id) ?? 999999;
+        const idxB = idOrder.get(b.id) ?? 999999;
+        return idxA - idxB;
+      });
+
+      saveNotes();
+    }
+    sortMode.value = 'custom';
+    storage.setItem('sticky_notes_sort_mode', 'custom');
   };
 
   const updateNoteLastUsed = (id: string) => {
@@ -319,6 +357,7 @@ export const useNoteStore = defineStore('noteStore', () => {
     updateNote,
     clearNotes,
     setSortMode,
+    solidifyCurrentOrderAsCustom,
     moveNote,
     updateNoteLastUsed,
     loadNotesForCurrentCategory,

@@ -33,9 +33,9 @@ const isPreviewActive = computed(() => store.previewNoteId === props.note.id);
 const isFullScreenMode = computed(() => !!props.isFullScreen);
 const isDetachedWindow = isDetachedNoteWindow();
 
-const handleOpenDetachedNote = () => {
+const handleOpenDetachedNote = async () => {
   const preset = COLOR_PRESETS[props.note.color] || COLOR_PRESETS.yellow;
-  const result = openDetachedNoteWindow({
+  const result = await openDetachedNoteWindow({
     id: props.note.id,
     title: props.note.title,
     backgroundColor: store.isDark ? preset.darkBg : preset.lightBg
@@ -158,7 +158,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
   display: flex;
   align-items: center;
   gap: 9px;
-  z-index: 2;
+  z-index: 10;
+  pointer-events: auto;
   transition: left 0.2s ease, gap 0.2s ease;
 
   &.is-full-screen {
@@ -317,7 +318,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
   top: 12px;
   right: 16px;
   margin-left: 0;
-  z-index: 2;
+  z-index: 10;
+  pointer-events: auto;
 
   &.is-full-screen {
     top: 14px;

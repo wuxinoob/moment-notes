@@ -1,162 +1,181 @@
 /**
- * 检查当前是否在 uTools 环境下运行
+ * 本地存储与运行环境适配层
+ * 支持纯前端 Web 模式与 Toolkit 插件 (Tauri) 模式
  */
-export const isUTools = (): boolean => {
-  return typeof window !== 'undefined' && window.utools !== undefined;
+
+const STORAGE_PREFIX = '__moment_notes_';
+
+/**
+ * 获取注入的 Toolkit 上下文 (如果存在)
+ */
+export const getToolkitCtx = (): any | null => {
+  if (typeof window !== 'undefined' && window.__TOOLKIT_CTX__) {
+    return window.__TOOLKIT_CTX__;
+  }
+  return null;
 };
 
 /**
- * 封装通用存储，在 uTools 下使用 dbStorage，在浏览器下使用 localStorage
+ * 检查当前是否在 Toolkit 插件环境中运行
+ */
+export const isToolkit = (): boolean => {
+  return getToolkitCtx() !== null;
+};
+
+/**
+ * 检查当前是否在 uTools 环境中运行 (兜底兼容)
+ */
+export const isUTools = (): boolean => {
+  return typeof window !== 'undefined' && typeof (window as any).utools !== 'undefined';
+};
+
+// 内存镜像缓存，加速读取并桥接异步存储
+const memoryCache = new Map<string, string>();
+
+export const clearStorageMemoryCache = (): void => {
+  memoryCache.clear();
+};
+
+/**
+ * 初始化存储缓存
+ * 如果在 Toolkit 环境下，从 ctx.storage 拉取已持久化数据
+ */
+export const initStorage = async (ctx?: any): Promise<void> => {
+  const targetCtx = ctx || getToolkitCtx();
+  if (targetCtx?.storage) {
+    try {
+      const keys: string[] = (await targetCtx.storage.keys()) || [];
+      if (keys.length > 0) {
+        // 使用 Promise.all 并行发起所有 key 的读取，消除 20+ 次串行 IPC 往返延迟
+        const values = await Promise.all(keys.map(k => targetCtx.storage.get(k)));
+        keys.forEach((k, i) => {
+          const val = values[i];
+          if (val !== null && val !== undefined) {
+            memoryCache.set(k, typeof val === 'string' ? val : JSON.stringify(val));
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('[Storage] Failed to preload from ctx.storage:', err);
+    }
+  }
+};
+
+/**
+ * 统一通用存储接口
+ * 优先使用内存缓存与 ctx.storage，降级使用 localStorage (兼顾命名空间与原生键名兼容)
  */
 export const storage = {
   getItem(key: string): string | null {
-    if (isUTools()) {
-      try {
-        const val = window.utools.dbStorage.getItem(key);
-        if (val === null || val === undefined) return null;
-        if (typeof val === 'object') {
-          return JSON.stringify(val);
-        }
+    // 1. 如果在 localStorage 中有定义，直接读取最新值 (兼容测试环境与多页面读写)
+    if (typeof localStorage !== 'undefined') {
+      const prefixedKey = key.startsWith(STORAGE_PREFIX) ? key : `${STORAGE_PREFIX}${key}`;
+      const val = localStorage.getItem(key) ?? localStorage.getItem(prefixedKey);
+      if (val !== null) {
+        memoryCache.set(key, val);
         return val;
-      } catch (e) {
-        console.error('uTools dbStorage.getItem error, falling back to localStorage:', e);
       }
     }
-    if (typeof localStorage !== 'undefined') {
-      return localStorage.getItem(key);
+
+    // 2. 从内存缓存获取
+    if (memoryCache.has(key)) {
+      return memoryCache.get(key) || null;
     }
+
     return null;
   },
 
   setItem(key: string, value: string): void {
-    if (isUTools()) {
+    memoryCache.set(key, value);
+
+    // 1. 同步写入本地 localStorage (同时保留原始 key 与前缀 key)
+    if (typeof localStorage !== 'undefined') {
       try {
-        window.utools.dbStorage.setItem(key, value);
-        return;
+        localStorage.setItem(key, value);
+        if (!key.startsWith(STORAGE_PREFIX)) {
+          localStorage.setItem(`${STORAGE_PREFIX}${key}`, value);
+        }
       } catch (e) {
-        console.error('uTools dbStorage.setItem error, falling back to localStorage:', e);
+        console.warn('[Storage] localStorage.setItem failed:', e);
       }
     }
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(key, value);
+
+    // 2. 若在 Toolkit 环境下，异步写入插件独立存储目录 ({appData}/plugin-data/<id>/data.json)
+    const ctx = getToolkitCtx();
+    if (ctx?.storage) {
+      let parsedValue: any = value;
+      try {
+        parsedValue = JSON.parse(value);
+      } catch {
+        // 保留原字符串
+      }
+      ctx.storage.set(key, parsedValue).catch((err: any) => {
+        console.warn(`[Storage] ctx.storage.set('${key}') failed:`, err);
+      });
     }
   },
 
   removeItem(key: string): void {
-    if (isUTools()) {
-      try {
-        window.utools.dbStorage.removeItem(key);
-        return;
-      } catch (e) {
-        console.error('uTools dbStorage.removeItem error, falling back to localStorage:', e);
-      }
-    }
+    memoryCache.delete(key);
+
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(key);
+      if (!key.startsWith(STORAGE_PREFIX)) {
+        localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
+      }
+    }
+
+    const ctx = getToolkitCtx();
+    if (ctx?.storage) {
+      ctx.storage.remove(key).catch((err: any) => {
+        console.warn(`[Storage] ctx.storage.remove('${key}') failed:`, err);
+      });
     }
   }
 };
 
 /**
- * 粘贴文本到鼠标光标处
- * 如果在 uTools 环境，自动隐藏插件窗口并粘贴
- * 如果在浏览器环境，写入剪切板并提示
+ * 复制文本到剪切板
  */
 export const pasteTextToCursor = async (text: string): Promise<boolean> => {
-  if (isUTools()) {
-    try {
-      if (window.utools.getWindowType() === 'detach') {
-        window.utools.copyText(text);
-        window.utools.outPlugin();
-        setTimeout(() => {
-          if (window.utools.isMacOS()) {
-            window.utools.simulateKeyboardTap('v', 'command');
-          } else {
-            window.utools.simulateKeyboardTap('v', 'control');
-          }
-        }, 60);
-      } else {
-        window.utools.hideMainWindowPasteText(text);
-      }
-      return true;
-    } catch (e) {
-      console.error('uTools paste text failed:', e);
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return false;
     }
+  } catch (e) {
+    console.warn('Clipboard copy failed, fallback to textarea:', e);
   }
 
-  // 浏览器降级处理：复制到剪贴板
-  try {
-    await navigator.clipboard.writeText(text);
-    return false; // 返回 false 表示只复制了，没能实现自动粘贴
-  } catch (e) {
-    console.error('Clipboard copy failed:', e);
-    // 最后的极简降级方案：创建临时 textarea 复制
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
+  // 极简降级方案：创建临时 textarea 复制
+  if (typeof document !== 'undefined') {
     try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
       document.execCommand('copy');
+      document.body.removeChild(textarea);
     } catch (err) {
       console.error('execCommand copy failed:', err);
     }
-    document.body.removeChild(textarea);
-    return false;
   }
+  return false;
 };
 
 /**
- * 保存文本内容为本地文件
- * 优先在 uTools 下通过 window.services 写入下载文件夹
- * 浏览器环境降级为 Blob 触发文件下载
- * @returns {'success' | 'canceled' | 'fallback'} 保存状态
+ * 保存文本内容为本地文件 (标准浏览器 Blob 下载)
  */
 export const downloadOrWriteFile = (
   content: string,
   filename: string,
   mimeType: string = 'text/plain'
 ): 'success' | 'canceled' | 'fallback' => {
-  if (isUTools()) {
-    if (typeof window !== 'undefined' && window.services?.writeTextFile) {
-      try {
-        const downloadsPath = window.utools.getPath('downloads');
-        const separator = downloadsPath.endsWith('/') || downloadsPath.endsWith('\\') ? '' : '/';
-        const defaultPath = `${downloadsPath}${separator}${filename}`;
-
-        const extension = filename.split('.').pop() || 'txt';
-        const savePath = window.utools.showSaveDialog({
-          title: '选择保存路径',
-          defaultPath: defaultPath,
-          buttonLabel: '保存',
-          filters: mimeType.includes('json')
-            ? [
-                { name: 'JSON Backup Files', extensions: [extension] },
-                { name: 'All Files', extensions: ['*'] }
-              ]
-            : [
-                { name: 'Text Files', extensions: [extension] },
-                { name: 'All Files', extensions: ['*'] }
-              ]
-        });
-
-        if (savePath) {
-          window.services.writeTextFile(content, savePath);
-          return 'success';
-        } else {
-          return 'canceled';
-        }
-      } catch (e) {
-        console.error(
-          'uTools showSaveDialog or writeTextFile failed, falling back to download:',
-          e
-        );
-      }
-    }
+  if (typeof document === 'undefined') {
+    return 'fallback';
   }
-
-  // 浏览器环境降级下载
   try {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -167,7 +186,7 @@ export const downloadOrWriteFile = (
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    return 'fallback';
+    return 'success';
   } catch (e) {
     console.error('Browser download fallback failed:', e);
     return 'fallback';

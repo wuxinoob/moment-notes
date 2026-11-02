@@ -1,0 +1,282 @@
+:root {
+  --font-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Outfit', var(--font-sans);
+
+  // 设计系统色彩 (Light Mode)
+  --bg-gradient-start: #f8fafc;
+  --bg-gradient-end: #e2e8f0;
+  --panel-bg: rgba(255, 255, 255, 0.45);
+  --panel-border: rgba(255, 255, 255, 0.6);
+  --sidebar-bg: rgba(255, 255, 255, 0.3);
+  --drawer-bg: rgba(255, 255, 255, 0.94);
+  --dock-bg: rgba(255, 255, 255, 0.92);
+  --glass-blur-heavy: blur(28px) saturate(190%);
+  --glass-blur-dock: blur(24px) saturate(180%);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent-color: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-light: rgba(99, 102, 241, 0.1);
+  --shadow-sm: 0 3px 8px -2px rgba(15, 23, 42, 0.12);
+  --shadow-md: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 16px -6px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 20px 40px -15px rgba(15, 23, 42, 0.12);
+  --divider-color: rgba(15, 23, 42, 0.08);
+  --drag-inside-bg: rgba(99, 102, 241, 0.12);
+
+  // 弹出层与弹窗
+  --popover-bg: #ffffff;
+  --popover-border: rgba(15, 23, 42, 0.08);
+  --popover-shadow: var(--shadow-md);
+
+  // 输入框
+  --input-bg: rgba(255, 255, 255, 0.8);
+  --input-border: rgba(15, 23, 42, 0.08);
+
+  // 按钮交互
+  --btn-bg: rgba(255, 255, 255, 0.8);
+  --btn-border: rgba(0, 0, 0, 0.08);
+  --btn-hover-bg: var(--accent-light);
+  --btn-hover-border: rgba(99, 102, 241, 0.2);
+  --btn-hover-color: var(--accent-color);
+
+  // 条目悬浮
+  --item-hover-bg: rgba(15, 23, 42, 0.04);
+  --action-btn-hover-bg: #e1e1fc;
+  --action-btn-danger-hover-bg: #fee2e2;
+
+  // 危险提示状态
+  --danger-color: #ef4444;
+  --danger-hover-bg: rgba(239, 68, 68, 0.1);
+  --danger-hover-border: rgba(239, 68, 68, 0.25);
+
+  // 辅助设计变量
+  --badge-bg: rgba(15, 23, 42, 0.06);
+  --text-on-accent: #ffffff;
+  --accent-border-dashed: rgba(99, 102, 241, 0.3);
+  --modal-overlay-bg: rgba(15, 23, 42, 0.35);
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --warning-color: #f59e0b;
+  --toast-success-bg: hsl(120, 75%, 92%, 0.85);
+  --toast-success-border: hsl(120, 75%, 82%);
+  --toast-success-text: hsl(120, 75%, 15%);
+  --toast-info-bg: hsl(200, 90%, 91%, 0.85);
+  --toast-info-border: hsl(200, 90%, 81%);
+  --toast-info-text: hsl(200, 85%, 15%);
+  --toast-warning-bg: hsl(48, 100%, 90%, 0.85);
+  --toast-warning-border: hsl(48, 100%, 78%);
+  --toast-warning-text: hsl(48, 85%, 15%);
+  --toast-error-bg: hsl(340, 85%, 92%, 0.85);
+  --toast-error-border: hsl(340, 85%, 83%);
+  --toast-error-text: hsl(340, 80%, 15%);
+}
+
+// 自动切换为暗黑模式
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-gradient-start: #0f172a;
+    --bg-gradient-end: #020617;
+    --panel-bg: rgba(15, 23, 42, 0.45);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --sidebar-bg: rgba(15, 23, 42, 0.2);
+    --drawer-bg: rgba(18, 24, 38, 0.95);
+    --dock-bg: rgba(18, 24, 38, 0.92);
+    --glass-blur-heavy: blur(28px) saturate(190%);
+    --glass-blur-dock: blur(24px) saturate(180%);
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #64748b;
+    --accent-color: #818cf8;
+    --accent-hover: #6366f1;
+    --accent-light: rgba(129, 140, 248, 0.15);
+    --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 16px -6px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 20px 40px -15px rgba(0, 0, 0, 0.4);
+    --divider-color: rgba(248, 250, 252, 0.08);
+    --drag-inside-bg: rgba(129, 140, 248, 0.18);
+
+    --popover-bg: #1e293b;
+    --popover-border: rgba(255, 255, 255, 0.08);
+    --popover-shadow: var(--shadow-lg);
+
+    // 输入框
+    --input-bg: rgba(0, 0, 0, 0.15);
+    --input-border: rgba(255, 255, 255, 0.08);
+
+    --btn-bg: rgba(255, 255, 255, 0.05);
+    --btn-border: rgba(255, 255, 255, 0.08);
+    --btn-hover-bg: rgba(255, 255, 255, 0.12);
+    --btn-hover-border: rgba(255, 255, 255, 0.15);
+    --btn-hover-color: var(--text-primary);
+
+    --item-hover-bg: rgba(255, 255, 255, 0.08);
+    --action-btn-hover-bg: #334155;
+    --action-btn-danger-hover-bg: #2d1921;
+
+    // 危险提示状态
+    --danger-color: #f87171;
+    --danger-hover-bg: rgba(248, 113, 113, 0.15);
+    --danger-hover-border: rgba(248, 113, 113, 0.25);
+
+    // 辅助设计变量
+    --badge-bg: rgba(255, 255, 255, 0.1);
+    --text-on-accent: #ffffff;
+    --accent-border-dashed: rgba(129, 140, 248, 0.35);
+    --modal-overlay-bg: rgba(0, 0, 0, 0.5);
+    --warning-bg: rgba(245, 158, 11, 0.2);
+    --warning-color: #fbbf24;
+    --toast-success-bg: hsl(120, 30%, 16%, 0.8);
+    --toast-success-border: hsl(120, 30%, 28%);
+    --toast-success-text: hsl(120, 85%, 85%);
+    --toast-info-bg: hsl(200, 40%, 17%, 0.8);
+    --toast-info-border: hsl(200, 40%, 30%);
+    --toast-info-text: hsl(200, 90%, 85%);
+    --toast-warning-bg: hsl(48, 40%, 18%, 0.8);
+    --toast-warning-border: hsl(48, 40%, 30%);
+    --toast-warning-text: hsl(48, 100%, 85%);
+    --toast-error-bg: hsl(340, 40%, 18%, 0.8);
+    --toast-error-border: hsl(340, 40%, 30%);
+    --toast-error-text: hsl(340, 90%, 85%);
+  }
+}
+
+// 显式类名切换暗黑模式
+.dark-theme,
+:root[data-theme='dark'],
+html[data-theme='dark'] {
+  --bg-gradient-start: #0f172a;
+  --bg-gradient-end: #020617;
+  --panel-bg: rgba(15, 23, 42, 0.45);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --sidebar-bg: rgba(15, 23, 42, 0.2);
+  --drawer-bg: rgba(18, 24, 38, 0.95);
+  --dock-bg: rgba(18, 24, 38, 0.92);
+  --glass-blur-heavy: blur(28px) saturate(190%);
+  --glass-blur-dock: blur(24px) saturate(180%);
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --accent-color: #818cf8;
+  --accent-hover: #6366f1;
+  --accent-light: rgba(129, 140, 248, 0.15);
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 16px -6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 40px -15px rgba(0, 0, 0, 0.4);
+  --divider-color: rgba(248, 250, 252, 0.08);
+  --drag-inside-bg: rgba(129, 140, 248, 0.18);
+
+  --popover-bg: #1e293b;
+  --popover-border: rgba(255, 255, 255, 0.08);
+  --popover-shadow: var(--shadow-lg);
+
+  // 输入框
+  --input-bg: rgba(0, 0, 0, 0.15);
+  --input-border: rgba(255, 255, 255, 0.08);
+
+  --btn-bg: rgba(255, 255, 255, 0.05);
+  --btn-border: rgba(255, 255, 255, 0.08);
+  --btn-hover-bg: rgba(255, 255, 255, 0.12);
+  --btn-hover-border: rgba(255, 255, 255, 0.15);
+  --btn-hover-color: var(--text-primary);
+
+  --item-hover-bg: rgba(255, 255, 255, 0.08);
+  --action-btn-hover-bg: #334155;
+  --action-btn-danger-hover-bg: #2d1921;
+
+  // 危险提示状态
+  --danger-color: #f87171;
+  --danger-hover-bg: rgba(248, 113, 113, 0.15);
+  --danger-hover-border: rgba(248, 113, 113, 0.25);
+
+  // 辅助设计变量
+  --badge-bg: rgba(255, 255, 255, 0.1);
+  --text-on-accent: #ffffff;
+  --accent-border-dashed: rgba(129, 140, 248, 0.35);
+  --modal-overlay-bg: rgba(0, 0, 0, 0.5);
+  --warning-bg: rgba(245, 158, 11, 0.2);
+  --warning-color: #fbbf24;
+  --toast-success-bg: hsl(120, 30%, 16%, 0.8);
+  --toast-success-border: hsl(120, 30%, 28%);
+  --toast-success-text: hsl(120, 85%, 85%);
+  --toast-info-bg: hsl(200, 40%, 17%, 0.8);
+  --toast-info-border: hsl(200, 40%, 30%);
+  --toast-info-text: hsl(200, 90%, 85%);
+  --toast-warning-bg: hsl(48, 40%, 18%, 0.8);
+  --toast-warning-border: hsl(48, 40%, 30%);
+  --toast-warning-text: hsl(48, 100%, 85%);
+  --toast-error-bg: hsl(340, 40%, 18%, 0.8);
+  --toast-error-border: hsl(340, 40%, 30%);
+  --toast-error-text: hsl(340, 90%, 85%);
+}
+
+// 显式类名切换浅色模式
+.light-theme,
+:root[data-theme='light'],
+html[data-theme='light'] {
+  --bg-gradient-start: #f8fafc;
+  --bg-gradient-end: #e2e8f0;
+  --panel-bg: rgba(255, 255, 255, 0.45);
+  --panel-border: rgba(255, 255, 255, 0.6);
+  --sidebar-bg: rgba(255, 255, 255, 0.3);
+  --drawer-bg: rgba(255, 255, 255, 0.94);
+  --dock-bg: rgba(255, 255, 255, 0.92);
+  --glass-blur-heavy: blur(28px) saturate(190%);
+  --glass-blur-dock: blur(24px) saturate(180%);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent-color: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-light: rgba(99, 102, 241, 0.1);
+  --shadow-sm: 0 2px 8px -2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 16px -6px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 20px 40px -15px rgba(15, 23, 42, 0.12);
+  --divider-color: rgba(15, 23, 42, 0.08);
+  --drag-inside-bg: rgba(99, 102, 241, 0.12);
+
+  --popover-bg: #ffffff;
+  --popover-border: rgba(15, 23, 42, 0.08);
+  --popover-shadow: var(--shadow-md);
+
+  // 输入框
+  --input-bg: rgba(255, 255, 255, 0.8);
+  --input-border: rgba(15, 23, 42, 0.08);
+
+  // 按钮交互
+  --btn-bg: rgba(255, 255, 255, 0.8);
+  --btn-border: rgba(0, 0, 0, 0.08);
+  --btn-hover-bg: var(--accent-light);
+  --btn-hover-border: rgba(99, 102, 241, 0.2);
+  --btn-hover-color: var(--accent-color);
+
+  // 条目悬浮
+  --item-hover-bg: rgba(15, 23, 42, 0.04);
+  --action-btn-hover-bg: #e1e1fc;
+  --action-btn-danger-hover-bg: #fee2e2;
+
+  // 危险提示状态
+  --danger-color: #ef4444;
+  --danger-hover-bg: rgba(239, 68, 68, 0.1);
+  --danger-hover-border: rgba(239, 68, 68, 0.25);
+
+  // 辅助设计变量
+  --badge-bg: rgba(15, 23, 42, 0.06);
+  --text-on-accent: #ffffff;
+  --accent-border-dashed: rgba(99, 102, 241, 0.3);
+  --modal-overlay-bg: rgba(15, 23, 42, 0.3);
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --warning-color: #f59e0b;
+  --toast-success-bg: hsl(120, 75%, 92%, 0.85);
+  --toast-success-border: hsl(120, 75%, 82%);
+  --toast-success-text: hsl(120, 75%, 15%);
+  --toast-info-bg: hsl(200, 90%, 91%, 0.85);
+  --toast-info-border: hsl(200, 90%, 81%);
+  --toast-info-text: hsl(200, 85%, 15%);
+  --toast-warning-bg: hsl(48, 100%, 90%, 0.85);
+  --toast-warning-border: hsl(48, 100%, 78%);
+  --toast-warning-text: hsl(48, 85%, 15%);
+  --toast-error-bg: hsl(340, 85%, 92%, 0.85);
+  --toast-error-border: hsl(340, 85%, 83%);
+  --toast-error-text: hsl(340, 80%, 15%);
+}

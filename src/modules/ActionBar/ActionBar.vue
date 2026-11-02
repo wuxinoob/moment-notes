@@ -1,14 +1,43 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useStickyNotesStore } from '@stores/stickyNotes';
-import { Plus, Trash2, Sun, Moon, Cloud, RefreshCw } from '@lucide/vue';
-import { isUTools } from '@utils/storage';
+import { Plus, Trash2, Sun, Moon, Cloud, RefreshCw, Pin, PinOff, Menu } from '@lucide/vue';
+import { isIndependentWindow, isWindowPinned, toggleWindowPin, dragCurrentWindow } from '@utils/windowControls';
 import { webdavSyncEngine } from '../../infrastructure/sync/WebdavSyncEngine';
 import SearchSection from './SearchSection.vue';
 import SortPopover from './SortPopover.vue';
 import GridColumnsPopover from './GridColumnsPopover.vue';
 
 const store = useStickyNotesStore();
+
+// 移动端当前分类显示名称
+const currentCategoryDisplayName = computed(() => {
+  if (store.currentCategoryId === 'all') return '全部便签';
+  if (store.currentCategoryId === 'recent') return '最近使用';
+  if (store.currentCategoryId === 'trash') return '最近删除';
+  const found = store.categories.find(c => c.id === store.currentCategoryId);
+  return found ? found.name : '全部便签';
+});
+
+// 独立窗口状态与窗口控制
+const isWindow = computed(() => isIndependentWindow());
+
+const pinTooltip = computed(() => {
+  return isWindowPinned.value
+    ? '已置顶固定 (失焦不隐藏，点击取消置顶)'
+    : '未置顶 (点击其他地方自动隐藏，点击置顶固定)';
+});
+
+const handleTogglePin = async () => {
+  await toggleWindowPin();
+  store.showToast(isWindowPinned.value ? '已置顶固定 (失焦不隐藏)' : '已取消置顶 (点击外部自动隐藏)');
+};
+
+const handleContainerDrag = (e: MouseEvent) => {
+  if (e.target === e.currentTarget) {
+    dragCurrentWindow(e);
+  }
+};
 
 // 当前处于展开状态的下拉菜单：'sort' | 'columns' | null
 const activePopover = ref<'sort' | 'columns' | null>(null);
@@ -59,7 +88,7 @@ onMounted(() => {
   document.addEventListener('click', closePopover);
 
   // 初始化主题并自动读取存储/系统设置
-  store.initTheme(isUTools());
+  store.initTheme();
 });
 
 onUnmounted(() => {
@@ -103,7 +132,18 @@ const handleAddNote = () => {
 </script>
 
 <template>
-  <div class="action-bar-container">
+  <div class="action-bar-container" data-tauri-drag-region @mousedown="handleContainerDrag">
+    <!-- 移动端分类抽屉触发按钮 + 当前分类名 (桌面端隐藏) -->
+    <button
+      class="mobile-category-trigger"
+      aria-label="打开分类菜单"
+      data-tooltip="打开分类菜单"
+      @click="store.toggleMobileSidebar"
+    >
+      <Menu class="mobile-menu-icon" />
+      <span class="mobile-category-name">{{ currentCategoryDisplayName }}</span>
+    </button>
+
     <!-- 搜索区域 -->
     <SearchSection />
 
@@ -122,10 +162,10 @@ const handleAddNote = () => {
         <Cloud v-else class="btn-icon" />
       </button>
 
-      <!-- 切换主题 -->
+      <!-- 切换主题 (移动端在底栏展示) -->
       <button
         v-if="store.enabledActionBarButtons.includes('theme-toggle')"
-        class="icon-btn theme-toggle"
+        class="icon-btn theme-toggle desktop-only-action"
         data-tooltip="切换主题"
         @click="store.toggleTheme"
       >
@@ -133,17 +173,19 @@ const handleAddNote = () => {
         <Moon v-else class="btn-icon" />
       </button>
 
-      <!-- 排序选择 -->
+      <!-- 排序选择 (移动端在底栏展示) -->
       <SortPopover
         v-if="store.enabledActionBarButtons.includes('sort-select')"
+        class="desktop-only-action"
         :is-open="activePopover === 'sort'"
         @toggle="togglePopover('sort')"
         @close="closePopover"
       />
 
-      <!-- 列数设置 -->
+      <!-- 列数设置 (桌面端顶栏快速切换，移动端可在设置中统一调整) -->
       <GridColumnsPopover
         v-if="store.enabledActionBarButtons.includes('columns-select')"
+        class="desktop-only-action"
         :is-open="activePopover === 'columns'"
         @toggle="togglePopover('columns')"
         @close="closePopover"
@@ -172,207 +214,33 @@ const handleAddNote = () => {
         <span>清空便签</span>
       </button>
 
-      <!-- 新建便签 (垃圾箱分类和最近使用分类下隐藏) -->
+      <!-- 新建便签 (移动端在底栏居中展示 FAB) -->
       <button
         v-if="store.currentCategoryId !== 'trash' && store.currentCategoryId !== 'recent'"
-        class="primary-btn add-btn"
+        class="primary-btn add-btn desktop-only-action"
         data-tooltip="新建便签"
         @click="handleAddNote"
       >
         <Plus class="btn-icon-plus" />
         <span>新建便签</span>
       </button>
+
+      <!-- 独立窗口置顶固定按钮 (右上角关闭改为置顶pin) -->
+      <div v-if="isWindow" class="window-control-wrapper">
+        <div class="window-control-divider"></div>
+        <button
+          class="icon-btn window-pin-btn"
+          :class="{ 'is-pinned': isWindowPinned }"
+          :data-tooltip="pinTooltip"
+          :title="pinTooltip"
+          @click.stop="handleTogglePin"
+        >
+          <Pin v-if="isWindowPinned" class="btn-icon pinned" />
+          <PinOff v-else class="btn-icon" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
-<style lang="scss" scoped>
-.action-bar-container {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
-  padding-bottom: 0;
-  gap: 16px;
-  position: relative;
-  z-index: 50;
-  -webkit-app-region: drag;
-}
-
-.actions-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  -webkit-app-region: no-drag !important;
-}
-
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: var(--btn-bg);
-  border: 1px solid var(--btn-border);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition:
-    opacity 0.2s ease,
-    background-color 0.2s ease,
-    border-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.2s ease;
-  background-clip: padding-box;
-
-  &:hover:not(:disabled) {
-    background: var(--btn-hover-bg);
-    color: var(--btn-hover-color);
-    border-color: var(--btn-hover-border);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  &.danger {
-    &:hover:not(:disabled) {
-      background: var(--danger-hover-bg);
-      border-color: var(--danger-hover-border);
-      color: var(--danger-color);
-    }
-  }
-
-  &.webdav-sync-btn {
-    &.syncing {
-      color: #3b82f6;
-      border-color: rgba(59, 130, 246, 0.4);
-    }
-    &.success {
-      color: #22c55e;
-    }
-    &.error {
-      color: #ef4444;
-    }
-  }
-
-  .btn-icon {
-    width: 16px;
-    height: 16px;
-  }
-
-  .spin {
-    animation: spin 1s linear infinite;
-  }
-
-  &.active {
-    color: var(--accent-color);
-    border-color: rgba(99, 102, 241, 0.25);
-    background: var(--accent-light);
-  }
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.primary-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  height: 38px;
-  line-height: 38px;
-  border-radius: 12px;
-  background: var(--accent-color);
-  color: #ffffff;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.3);
-  transition:
-    opacity 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
-
-  &:hover:not(:disabled) {
-    background: var(--accent-hover);
-    box-shadow: 0 6px 16px -2px rgba(99, 102, 241, 0.4);
-    transform: translateY(-1px);
-  }
-
-  &:active:not(:disabled) {
-    transform: translateY(0);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    box-shadow: none;
-  }
-
-  .btn-icon-plus {
-    width: 16px;
-    height: 16px;
-  }
-
-  &.danger-btn {
-    background: var(--danger-color, #ff4d4f);
-    box-shadow: 0 4px 12px -2px rgba(255, 77, 79, 0.3);
-
-    &:hover:not(:disabled) {
-      background: #ff7875;
-      box-shadow: 0 6px 16px -2px rgba(255, 77, 79, 0.4);
-    }
-  }
-
-  &.add-btn {
-    &:hover:not(:disabled) {
-      box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.3);
-      transform: none;
-    }
-
-    &:active:not(:disabled) {
-      transform: none;
-    }
-  }
-}
-
-@media (max-width: $screen-compact) {
-  .action-bar-container {
-    padding: 12px 16px;
-    padding-bottom: 0;
-    gap: 12px;
-  }
-
-  .actions-wrapper {
-    gap: 6px;
-  }
-
-  .icon-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-  }
-
-  .primary-btn {
-    height: 34px;
-    padding: 0 12px;
-    border-radius: 10px;
-  }
-}
-
-@media (max-width: $screen-tablet) {
-  .primary-btn {
-    width: 34px;
-    padding: 0;
-    justify-content: center;
-
-    span {
-      display: none;
-    }
-  }
-}
-</style>
+<style lang="scss" scoped src="./ActionBar.scss"></style>

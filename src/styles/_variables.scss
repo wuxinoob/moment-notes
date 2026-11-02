@@ -10,6 +10,7 @@ $radius-md: 10px;
 $radius-lg: 12px;
 $radius-xl: 16px;
 $radius-round: 50%;
+$window-radius: 10px; // 独立窗体统一圆角规范 (精准贴合 Windows 11 DWM 系统物理圆角 8~12px，消除透空与露白)
 
 // 全局 z-index 层级架构规范 (各弹窗/浮层保留 10 步长间距)
 $z-index-base: 1;             // 基础卡片与页面元素

@@ -1,9 +1,8 @@
 <script lang="ts" setup>
 import { ref, computed, watch } from 'vue';
-import { Palette, FolderInput, Check, Copy, Trash2, RotateCcw, Folder, FileText, FileCode } from '@lucide/vue';
+import { Palette, FolderInput, Check, Copy, Trash2, RotateCcw, Folder, FileText, FileCode, Paperclip } from '@lucide/vue';
 import { Note, NoteType } from '@type';
 import { useStickyNotesStore, COLOR_PRESETS } from '@stores/stickyNotes';
-import { isUTools } from '@utils/storage';
 import { formatDate } from '@utils/date';
 import BasePopover from '@components/BasePopover.vue';
 
@@ -15,6 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'save-edit'): void;
   (e: 'cancel-edit'): void;
+  (e: 'add-attachment'): void;
   (e: 'popover-state-change', isOpen: boolean): void;
 }>();
 
@@ -33,7 +33,11 @@ const closePopovers = () => {
   showFormatPicker.value = false;
 };
 
-watch(() => showColorPicker.value || showFolderPicker.value || showFormatPicker.value, (isOpen) => {
+const hasActivePopover = computed(() => {
+  return showColorPicker.value || showFolderPicker.value || showFormatPicker.value;
+});
+
+watch(hasActivePopover, (isOpen) => {
   emit('popover-state-change', isOpen);
 });
 
@@ -78,11 +82,7 @@ const copyNoteContent = async (e?: MouseEvent) => {
       return;
     }
 
-    if (isUTools()) {
-      window.utools.copyText(textToCopy);
-    } else {
-      await navigator.clipboard.writeText(textToCopy);
-    }
+    await navigator.clipboard.writeText(textToCopy);
     store.showToast(isSelectedText ? '已复制选中内容' : '已复制便签内容', 'success');
     store.updateNoteLastUsed(props.note.id);
   } catch (err) {
@@ -131,18 +131,36 @@ const deleteSelf = async () => {
 </script>
 
 <template>
-  <!-- 编辑态底部的保存/取消按钮 -->
+  <!-- 编辑态底部的操作栏 -->
   <div v-if="isEditing" class="edit-footer" @click.stop>
-    <button class="edit-btn cancel" @click="emit('cancel-edit')">
-      取消
-    </button>
-    <button class="edit-btn save" @click="emit('save-edit')">
-      保存
-    </button>
+    <div class="edit-tools">
+      <button
+        class="edit-tool-btn"
+        type="button"
+        title="添加附件 (图片、音视频、文档等)"
+        @click="emit('add-attachment')"
+      >
+        <Paperclip class="edit-tool-icon" />
+        <span>添加附件</span>
+      </button>
+    </div>
+    <div class="edit-actions">
+      <button class="edit-btn cancel" @click="emit('cancel-edit')">
+        取消
+      </button>
+      <button class="edit-btn save" @click="emit('save-edit')">
+        保存
+      </button>
+    </div>
   </div>
 
   <!-- 卡片底部信息及悬浮工具栏 (非编辑态) -->
-  <div v-else class="card-footer" @click.stop>
+  <div
+    v-else
+    class="card-footer"
+    :class="{ 'has-active-popover': hasActivePopover }"
+    @click.stop
+  >
     <div class="card-meta-info" :data-tooltip="`更新时间: ${formattedTime} · 总字数: ${note.content.length} 字`">
       {{ formattedTime }} · {{ note.content.length }} 字
     </div>
@@ -171,7 +189,7 @@ const deleteSelf = async () => {
     </div>
 
     <!-- 正常卡片操作栏 -->
-    <div v-else class="card-actions" :class="{ 'has-active-popover': showColorPicker || showFolderPicker || showFormatPicker }">
+    <div v-else class="card-actions" :class="{ 'has-active-popover': hasActivePopover }">
       <!-- 分组 -->
       <button
         v-if="['all', 'recent'].includes(store.currentCategoryId)"
@@ -313,9 +331,49 @@ const deleteSelf = async () => {
 <style lang="scss" scoped>
 .edit-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   margin-top: 6px;
+}
+
+.edit-tools {
+  display: flex;
+  align-items: center;
+}
+
+.edit-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--btn-bg);
+  color: inherit;
+  border: 1px solid var(--btn-border);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: all 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+    background: var(--card-btn-hover-bg);
+    color: var(--card-btn-hover-color);
+    border-color: var(--card-btn-hover-bg);
+  }
+
+  .edit-tool-icon {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .edit-btn {
@@ -352,16 +410,27 @@ const deleteSelf = async () => {
 }
 
 .card-footer {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-top: 1px dashed var(--popover-border);
   padding-top: 8px;
+  min-height: 30px;
+  max-height: 30px;
+  overflow: hidden;
+  box-sizing: border-box;
   font-size: 10px;
   color: inherit;
   opacity: 0.8;
   transition: opacity 0.25s ease;
   min-width: 0;
+
+  &.has-active-popover {
+    opacity: 1;
+    overflow: visible;
+    z-index: 20;
+  }
 }
 
 .card-meta-info {
@@ -380,6 +449,7 @@ const deleteSelf = async () => {
 
 
 .card-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -407,6 +477,7 @@ const deleteSelf = async () => {
     max-width: 160px;
     pointer-events: auto;
     overflow: visible;
+    z-index: 21;
   }
 }
 

@@ -2,12 +2,13 @@
 import { ref, provide, computed, watch, onUnmounted } from 'vue';
 import { useStickyNotesStore } from '@stores/stickyNotes';
 import { Trash2, History } from '@lucide/vue';
-import { isUTools } from '@/utils/storage';
 import CategoryItem from './CategoryItem.vue';
 import CategoryMenuItem from './CategoryMenuItem.vue';
 import { useDragAutoScroll } from '@utils/useDragAutoScroll';
+import { useResponsive } from '@utils/useResponsive';
 
 const store = useStickyNotesStore();
+const { isMobile } = useResponsive();
 
 // 处于编辑重命名状态的分类ID
 const editingId = ref<string | null>(null);
@@ -81,11 +82,11 @@ onUnmounted(() => {
 const getCategoryLevel = (id: string): number => {
   if (id === 'all' || id === 'trash' || id === 'recent') return 0;
   let level = 0;
-  let current = store.categories.find(c => c.id === id);
+  let current = store.categories.find(c => c.id === id && !c.isDeleted);
   while (current && current.parentId) {
     level++;
     const parentId = current.parentId;
-    current = store.categories.find(c => c.id === parentId);
+    current = store.categories.find(c => c.id === parentId && !c.isDeleted);
   }
   return level;
 };
@@ -132,7 +133,7 @@ const getNextSibling = (cat: any) => {
   if (!cat.parentId) {
     siblings = categoryTree.value;
   } else {
-    const parent = store.categories.find(c => c.id === cat.parentId);
+    const parent = store.categories.find(c => c.id === cat.parentId && !c.isDeleted);
     if (parent) {
       const findChildren = (nodes: any[]): any[] | null => {
         for (const node of nodes) {
@@ -263,18 +264,18 @@ const onContainerDrop = (event: DragEvent) => {
         // Drop 'before' all or 'after' all when no custom categories
         store.moveCategory(sourceId, undefined, 'all', dragPlacement.value);
       }
-      const sourceCat = store.categories.find(c => c.id === sourceId);
+      const sourceCat = store.categories.find(c => c.id === sourceId && !c.isDeleted);
       store.showToast(`已将分类 "${sourceCat?.name || '全部便签'}" 移至对应位置`);
     } else {
-      const targetCat = store.categories.find(c => c.id === targetId);
+      const targetCat = store.categories.find(c => c.id === targetId && !c.isDeleted);
       if (targetCat) {
         if (dragPlacement.value === 'inside') {
           store.moveCategory(sourceId, targetId, undefined, 'inside');
-          const sourceCat = store.categories.find(c => c.id === sourceId);
+          const sourceCat = store.categories.find(c => c.id === sourceId && !c.isDeleted);
           store.showToast(`已将分类 "${sourceCat?.name}" 移入 "${targetCat.name}" 内部`);
         } else {
           store.moveCategory(sourceId, targetCat.parentId, targetId, dragPlacement.value);
-          const sourceCat = store.categories.find(c => c.id === sourceId);
+          const sourceCat = store.categories.find(c => c.id === sourceId && !c.isDeleted);
           const placementText = dragPlacement.value === 'before' ? '上方' : '下方';
           store.showToast(
             `已将分类 "${sourceCat?.name || '全部便签'}" 移至 "${targetCat.name}" 的${placementText}`
@@ -333,9 +334,17 @@ const submitAddSub = (parentId?: string) => {
   cancelAddSub();
 };
 
+// 选择分类并自动在移动端收起抽屉
+const handleSelectCategory = (id: string) => {
+  store.currentCategoryId = id;
+  if (isMobile.value) {
+    store.closeMobileSidebar();
+  }
+};
+
 // 单击分类项处理
 const handleCategoryClick = (cat: any) => {
-  store.currentCategoryId = cat.id;
+  handleSelectCategory(cat.id);
 };
 
 // 双击分类项处理
@@ -349,7 +358,8 @@ const handleCategoryDblClick = (cat: any) => {
 
 // 构建并排序树形结构
 const categoryTree = computed(() => {
-  const catMap = new Map(store.categories.map(c => [c.id, { ...c, children: [] as any[] }]));
+  const activeCategories = store.categories.filter(c => !c.isDeleted);
+  const catMap = new Map(activeCategories.map(c => [c.id, { ...c, children: [] as any[] }]));
   const rootCategories: any[] = [];
 
   // 将 "全部便签" 作为特殊的系统根分类加入树中，使其参与拖拽排序
@@ -363,7 +373,7 @@ const categoryTree = computed(() => {
   catMap.set('all', allItem);
   rootCategories.push(allItem);
 
-  store.categories.forEach(c => {
+  activeCategories.forEach(c => {
     const item = catMap.get(c.id)!;
     if (c.parentId && catMap.has(c.parentId)) {
       catMap.get(c.parentId)!.children.push(item);
@@ -409,7 +419,7 @@ provide('categoryContext', {
 <template>
   <div
     ref="sidebarMenuRef"
-    :class="{ uTools: isUTools(), 'is-dragging': draggedCatId !== null }"
+    :class="{ 'is-dragging': draggedCatId !== null }"
     class="sidebar-menu"
     @dragover="onSidebarDragOver"
     @drop="onContainerDrop"
@@ -437,7 +447,7 @@ provide('categoryContext', {
       :badge="store.showNoteCount ? store.recentNotesCount : 0"
       custom-class="recent-item"
       tooltip="最近复制/双击使用过的便签"
-      @click="store.currentCategoryId = 'recent'"
+      @click="handleSelectCategory('recent')"
     />
 
     <!-- 垃圾箱分类 -->
@@ -448,7 +458,7 @@ provide('categoryContext', {
       :badge="store.showNoteCount ? store.trashNotesCount : 0"
       custom-class="trash-item"
       tooltip="已删除的便签"
-      @click="store.currentCategoryId = 'trash'"
+      @click="handleSelectCategory('trash')"
     />
   </div>
 </template>

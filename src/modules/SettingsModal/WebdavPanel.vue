@@ -10,9 +10,11 @@ import {
   Plug,
   ArrowUpCircle,
   ArrowDownCircle,
-  ShieldCheck
+  ShieldCheck,
+  Trash2
 } from '@lucide/vue';
 import { webdavSyncEngine, WebdavClient } from '../../infrastructure/sync/WebdavSyncEngine';
+import { imageLifecycleService } from '../../infrastructure/sync/ImageLifecycleService';
 import { useStickyNotesStore } from '../../stores/stickyNotes';
 import { useUiStore } from '../../stores/uiStore';
 
@@ -74,6 +76,29 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
     uiStore.showToast(`✅ ${res.message}`);
   } else {
     uiStore.showToast(`❌ ${res.message}`);
+  }
+};
+
+const isCleaningGC = ref(false);
+const handleCleanImageGC = async () => {
+  if (isCleaningGC.value) return;
+  isCleaningGC.value = true;
+  uiStore.showToast('正在执行孤儿图片扫描与垃圾回收...');
+  try {
+    const client = new WebdavClient(config.value);
+    const res = await imageLifecycleService.performImageGC(
+      stickyStore.allNotes,
+      config.value.enabled ? client : undefined,
+      {
+        gracePeriodDays: 7,
+        remoteDir: config.value.imagesRemoteDir || '/toolkit/moment_notes_images'
+      }
+    );
+    uiStore.showToast(`清理完成：本地已清理 ${res.cleanedLocal} 张，远端已清理 ${res.cleanedRemote} 张 (有效引用 ${res.activeCount} 张)`, 'success');
+  } catch (err: any) {
+    uiStore.showToast(`清理失败: ${err.message}`, 'error');
+  } finally {
+    isCleaningGC.value = false;
   }
 };
 </script>
@@ -217,6 +242,55 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
           />
           <span class="field-hint">后台常驻期间定期检查并双向同步云端改动 (默认 5 分钟)</span>
         </div>
+
+        <!-- 便签图片云端同步开关 -->
+        <div class="setting-row sub-row">
+          <div class="row-label-group">
+            <span class="row-title">同步便签图片与附件</span>
+            <span class="row-desc">将便签中粘贴的截图独立保存至 WebDAV 文件夹，跨设备漫游并按需懒加载</span>
+          </div>
+          <label class="switch-control">
+            <input v-model="config.syncImages" type="checkbox" @change="handleSave" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- 图片同步子选项 -->
+        <template v-if="config.syncImages !== false">
+          <div class="input-field-item">
+            <label class="field-label">云端图片存放目录</label>
+            <input
+              v-model="config.imagesRemoteDir"
+              type="text"
+              class="text-input"
+              placeholder="/toolkit/moment_notes_images"
+              @blur="handleSave"
+            />
+            <span class="field-hint">WebDAV 远端存储图片的独立目录，默认 /toolkit/moment_notes_images</span>
+          </div>
+
+          <div class="setting-row sub-row">
+            <div class="row-label-group">
+              <span class="row-title">粘贴时自动压缩大图</span>
+              <span class="row-desc">超过 5MB 的大图在客户端自动等比降采样，节省云盘空间与传输带宽</span>
+            </div>
+            <label class="switch-control">
+              <input v-model="config.autoCompressImages" type="checkbox" @change="handleSave" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row sub-row">
+            <div class="row-label-group">
+              <span class="row-title">图片生命周期垃圾回收 (GC)</span>
+              <span class="row-desc">扫描并清理超过 7 天且未被任何便签引用的无主孤儿图片</span>
+            </div>
+            <button class="tool-btn test-btn" :disabled="isCleaningGC" @click="handleCleanImageGC">
+              <Trash2 class="btn-icon" />
+              <span>{{ isCleaningGC ? '清理中...' : '清理孤儿图片' }}</span>
+            </button>
+          </div>
+        </template>
 
         <!-- 墓碑机制说明卡片 -->
         <div class="tombstone-info-box">

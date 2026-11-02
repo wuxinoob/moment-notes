@@ -9,6 +9,8 @@ export interface Category {
   updatedAt?: number;
   isDeleted?: boolean;
   deletedAt?: number;
+  isPurged?: boolean;
+  purgedAt?: number;
   parentId?: string;
 }
 
@@ -28,6 +30,8 @@ export interface Note {
   tags?: string[];
   isDeleted?: boolean;
   deletedAt?: number;
+  isPurged?: boolean;
+  purgedAt?: number;
   lastUsedAt?: number;
   useCount?: number;
 }
@@ -84,7 +88,9 @@ export interface BackupData {
   timestamp: number;
   categories: Category[];
   notes: Note[];
+  categoryOrder?: string[];
   settings?: AppSettings;
+  assets?: Record<string, { mime: string; data: string }>;
 }
 
 export interface ExportOptions {
@@ -115,4 +121,28 @@ export interface WebdavConfig {
   lastSyncStatus?: WebdavSyncState;
   lastSyncTime?: number;
   lastSyncMessage?: string;
+  lastEtag?: string;
+  syncImages?: boolean;
+  imagesRemoteDir?: string;
+  autoCompressImages?: boolean;
+  maxImageSizeMB?: number;
 }
+
+export type AttachmentType = 'image' | 'audio' | 'video' | 'file';
+
+export interface AttachmentMeta {
+  id: string; // e.g. "img_1a2b3c4d5e6f.png", "audio_1a2b3c.mp3", "file_1a2b.pdf"
+  path: string; // e.g. "images/img_xxx.png" or "attachments/file_xxx.pdf"
+  size: number;
+  mimeType: string;
+  createdAt: number;
+  uploadStatus: 'pending' | 'uploaded' | 'failed';
+  type?: AttachmentType;
+  originalName?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+}
+
+export type ImageMeta = AttachmentMeta;
+

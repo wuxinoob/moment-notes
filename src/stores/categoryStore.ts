@@ -240,8 +240,9 @@ export const useCategoryStore = defineStore('categoryStore', () => {
   const addCategory = (name: string, parentId?: string): Category | undefined => {
     if (!name.trim()) return;
     const now = Date.now();
+    const uniqueId = `${now}_${Math.random().toString(36).slice(2, 7)}`;
     const newCategory: Category = {
-      id: now.toString(),
+      id: uniqueId,
       name: name.trim(),
       createdAt: now,
       updatedAt: now,
@@ -260,14 +261,19 @@ export const useCategoryStore = defineStore('categoryStore', () => {
 
   const deleteCategory = (id: string) => {
     const now = Date.now();
-    const targetCat = categories.value.find(c => c.id === id);
-    if (targetCat) {
-      targetCat.isDeleted = true;
-      targetCat.deletedAt = now;
-      targetCat.updatedAt = now;
-    }
+    let targetParentId: string | undefined;
 
-    const targetParentId = targetCat?.parentId;
+    categories.value.forEach(c => {
+      if (c.id === id) {
+        c.isDeleted = true;
+        c.deletedAt = now;
+        c.updatedAt = now;
+        if (c.parentId !== undefined) {
+          targetParentId = c.parentId;
+        }
+      }
+    });
+
     categories.value.forEach(c => {
       if (c.parentId === id) {
         c.parentId = targetParentId;

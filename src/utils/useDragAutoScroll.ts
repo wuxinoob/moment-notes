@@ -36,7 +36,7 @@ export function useDragAutoScroll(
     animationFrameId = requestAnimationFrame(scrollLoop);
   };
 
-  const handleDragOver = (e: DragEvent) => {
+  const handleDragOver = (e: { clientX: number; clientY: number }) => {
     const container = containerRef.value;
     if (!container) return;
 

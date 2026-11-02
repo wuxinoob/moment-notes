@@ -10,6 +10,7 @@ import ConfirmModal from '@components/ConfirmModal.vue';
 import SettingsModal from '@modules/SettingsModal/SettingsModal.vue';
 import ExportModal from '@modules/DataModal/ExportModal.vue';
 import ImportModal from '@modules/DataModal/ImportModal.vue';
+import MobileBottomBar from '@modules/MobileBottomBar/MobileBottomBar.vue';
 
 
 const store = useStickyNotesStore();
@@ -35,7 +36,16 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-layout">
-    <!-- 左侧分类侧边栏 -->
+    <!-- 移动端侧边栏半透明遮罩背景 -->
+    <Transition name="drawer-fade">
+      <div
+        v-if="store.isMobileSidebarOpen"
+        class="mobile-sidebar-backdrop"
+        @click="store.closeMobileSidebar"
+      ></div>
+    </Transition>
+
+    <!-- 左侧分类侧边栏 (移动端自适应为侧滑抽屉) -->
     <CategorySidebar />
 
     <!-- 右侧内容主面板 -->
@@ -47,6 +57,9 @@ onUnmounted(() => {
       <Transition name="fade-slide" mode="out-in">
         <NoteGrid v-if="store.isInitialized" :key="store.currentCategoryId" />
       </Transition>
+
+      <!-- 方案 B：移动端底部集成操作栏 (Bottom App Bar) -->
+      <MobileBottomBar />
     </main>
 
     <!-- 全局状态提示 -->
@@ -79,6 +92,41 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.01);
+  min-width: 0;
+  position: relative;
+}
+
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: $screen-mobile) {
+  .mobile-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: calc(#{$z-index-modal-level1} - 1);
+    cursor: pointer;
+  }
+}
+
+/* 抽屉遮罩淡入淡出动画 */
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
 }
 
 /* 分类切换时的淡入淡出滑动过渡 */

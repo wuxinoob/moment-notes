@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SettingWrapper from './controls/SettingWrapper.vue';
 import { SettingItem } from './settingsConfig';
+import logoUrl from '@/assets/logo.png';
 
 defineProps<{
   item: SettingItem;
@@ -13,7 +14,7 @@ const version = __APP_VERSION__
   <SettingWrapper :item="item">
     <div class="about-wrapper">
       <div class="about-card">
-        <img src="/logo.png" class="about-logo" alt="logo" />
+        <img :src="logoUrl" class="about-logo" alt="logo" />
         <div class="about-info">
           <h5 class="app-name">
             拾光便签

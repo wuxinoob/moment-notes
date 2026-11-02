@@ -2,19 +2,16 @@
   "name": "moment-notes",
   "version": "1.7.0",
   "private": true,
-  "description": "拾光便签：一款基于 Vue 3 + TypeScript + Vite 构建的高颜值、高生产力的 uTools 便签插件。",
+  "description": "拾光便签：基于 Vue 3 + TypeScript + Vite 构建的高颜值 WebDAV 便签应用，支持纯前端与 Toolkit Tauri 插件运行。",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/clean-utools.js && vite",
-    "dev:utools": "node scripts/copy-utools.js --dev && vite",
-    "build": "node scripts/clean-utools.js && vue-tsc --noEmit && vite build",
-    "build:web": "node scripts/clean-utools.js && vue-tsc --noEmit && vite build",
-    "build:utools": "vue-tsc --noEmit && vite build && node scripts/copy-utools.js",
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:plugin": "vite build --config vite.config.plugin.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint src --fix",
     "lint:nocache": "eslint src --fix --no-cache",
-    "deploy": "node scripts/deploy.js",
     "prepare": "husky"
   },
   "dependencies": {
@@ -39,8 +36,8 @@
     "lint-staged": "^15.2.2",
     "sass": "^1.100.0",
     "typescript": "^6.0.3",
-    "utools-api-types": "^7.5.1",
     "vite": "^8.0.16",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^4.1.10",
     "vue-tsc": "^3.3.3"
   },

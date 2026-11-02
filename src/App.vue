@@ -1,26 +1,31 @@
 <script lang="ts" setup>
 import { onMounted, onUnmounted } from 'vue';
 import { useStickyNotesStore } from '@stores/stickyNotes';
-import { isUTools } from '@utils/storage';
+import { initStorage, getToolkitCtx } from '@utils/storage';
+import { webdavSyncEngine } from './infrastructure/sync/WebdavSyncEngine';
 import Dashboard from '@views/Dashboard.vue';
 import ImagePreviewModal from '@components/ImagePreviewModal.vue';
 import NotePreviewModal from '@components/NotePreviewModal.vue';
 import { eventBus } from './domain/events/DomainEventBus';
 import {
   refreshDetachedNoteWindows,
-  setDetachedNoteWindowAlwaysOnTop,
-  toggleDetachedNoteWindowMaximize
+  subscribeDetachedNoteEvents
 } from './infrastructure/windows/detachedNoteWindow';
+import {
+  isIndependentWindow,
+  isWindowPinned,
+  hideCurrentWindow,
+  setWindowAlwaysOnTop
+} from '@utils/windowControls';
 
 const store = useStickyNotesStore();
 const unsubscribeCallbacks: Array<() => void> = [];
 
-onMounted(() => {
+onMounted(async () => {
   const isDevMode =
     import.meta.env.DEV ||
     window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    (typeof window !== 'undefined' && (window as any).utools?.isDev?.());
+    window.location.hostname === '127.0.0.1';
 
   if (isDevMode) {
     (window as any).resetTags = store.devResetTags;
@@ -32,72 +37,96 @@ onMounted(() => {
     console.log('- resetAllData(): 清空缓存，完全重置分类与便签数据');
   }
 
-  if (isUTools()) {
-    document.documentElement.classList.add('is-utools');
+  // 1. 同步加载本地已有数据与主题，秒级呈现首屏
+  store.loadData();
+  store.initTheme();
 
-    const detachedNoteService = window.services?.detachedNote;
-    if (detachedNoteService) {
-      unsubscribeCallbacks.push(
-        detachedNoteService.onChildChanged(() => {
-          store.reloadNotes();
-          refreshDetachedNoteWindows();
-        }),
-        detachedNoteService.onAlwaysOnTopRequested(({ noteId, alwaysOnTop }) => {
-          setDetachedNoteWindowAlwaysOnTop(noteId, alwaysOnTop);
-        }),
-        detachedNoteService.onToggleMaximizeRequested(({ noteId }) => {
-          toggleDetachedNoteWindowMaximize(noteId);
-        })
-      );
-    }
+  // 2. 后台异步预热远程存储层，完成后若有改动则自动静默刷新
+  initStorage().then(() => {
+    store.reloadNotes();
+  }).catch(() => {});
 
-    // 监听 uTools 插件进入事件
-    window.utools.onPluginEnter(action => {
-      // 触发数据加载以保证是最新的
-      store.loadData();
-
-      // 自动同步/更新主题
-      store.initTheme(true);
-
-      // 判断是否是通过超级面板打开
-      const isSuperPanel = action.code === 'save_note' || action.type === 'over';
-
-      if (isSuperPanel) {
-        // 读取并校验超级面板默认的打开分类
-        const targetCategory = store.superPanelDefaultCategory || 'all';
-        const isSystemCat = ['all', 'recent', 'trash'].includes(targetCategory);
-        const exists = isSystemCat || store.categories.some((c: any) => c.id === targetCategory);
-        const finalCategory = exists ? targetCategory : 'all';
-
-        // uTools 提供了强大的文本输入匹配能力，支持将用户选中的文本快速保存
-        // action.type 为 'text' 或 'over' (文本匹配指令)
-        if (action.type === 'over') {
-          const textPayload = action.payload;
-          if (textPayload && textPayload.trim()) {
-            // 新建便签保存到 finalCategory 分类下
-            const newNote = store.addNote(finalCategory, textPayload.trim(), '💡 快捷导入');
-            store.showToast('已自动从输入源新建便签');
-            if (newNote && newNote.categoryId) {
-              store.currentCategoryId = newNote.categoryId;
-            }
-          } else {
-            store.currentCategoryId = finalCategory;
-          }
-        } else {
-          store.currentCategoryId = finalCategory;
-        }
-      }
+  // 3. 监听来自宿主快捷键呼出时的同步探测请求 (插件模式事件驱动无感同步)
+  const toolkitCtx = getToolkitCtx();
+  if (toolkitCtx?.bus) {
+    toolkitCtx.bus.subscribe('moment-notes:sync-check', () => {
+      webdavSyncEngine.triggerSyncCheck({ silent: true, minIntervalMs: 5000 }).catch(() => {});
     });
-  } else {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === 'sticky_notes_notes') {
-        store.reloadNotes();
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    unsubscribeCallbacks.push(() => window.removeEventListener('storage', handleStorage));
   }
 
+  // 4. 插件悬浮窗生命周期：初始化置顶状态与失焦自动隐藏 (当未置顶时点击其他地方自动隐藏)
+  if (isIndependentWindow() && isWindowPinned.value) {
+    setWindowAlwaysOnTop(true).catch(() => {});
+  }
+
+  let blurTimer: number | null = null;
+  const handleWindowBlur = () => {
+    if (!isIndependentWindow()) return;
+    // 若处于置顶固定状态，失焦不自动隐藏
+    if (isWindowPinned.value) return;
+    // 若正在唤起系统文件选择框，失焦不隐藏
+    if ((window as any).__isFileDialogActive) return;
+
+    if (blurTimer) clearTimeout(blurTimer);
+    blurTimer = window.setTimeout(async () => {
+      blurTimer = null;
+      if (
+        typeof document !== 'undefined' &&
+        !document.hasFocus() &&
+        !isWindowPinned.value &&
+        !(window as any).__isFileDialogActive
+      ) {
+        await hideCurrentWindow();
+      }
+    }, 120);
+  };
+
+  const handleWindowFocus = () => {
+    if (blurTimer) {
+      clearTimeout(blurTimer);
+      blurTimer = null;
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      webdavSyncEngine.triggerSyncCheck({ silent: true, minIntervalMs: 15000 }).catch(() => {});
+    }
+  };
+
+  const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && isIndependentWindow()) {
+      const hasModal = document.querySelector('.modal-backdrop, .preview-modal-overlay, .image-preview-overlay');
+      if (!hasModal && !store.editingNoteId) {
+        hideCurrentWindow();
+      }
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleWindowFocus);
+  window.addEventListener('focus', handleWindowFocus);
+  window.addEventListener('blur', handleWindowBlur);
+  window.addEventListener('keydown', handleGlobalKeyDown);
+
+  unsubscribeCallbacks.push(() => {
+    if (blurTimer) clearTimeout(blurTimer);
+    document.removeEventListener('visibilitychange', handleWindowFocus);
+    window.removeEventListener('focus', handleWindowFocus);
+    window.removeEventListener('blur', handleWindowBlur);
+    window.removeEventListener('keydown', handleGlobalKeyDown);
+  });
+
+  // 5. 监听独立便签窗口与跨窗口同步事件
+  unsubscribeCallbacks.push(
+    subscribeDetachedNoteEvents(
+      () => {
+        store.reloadNotes();
+      },
+      (_noteId: string) => {
+        store.reloadNotes();
+        refreshDetachedNoteWindows();
+      }
+    )
+  );
+
+  // 6. 监听领域事件，向其他窗口广播刷新
   unsubscribeCallbacks.push(
     eventBus.subscribe('NOTE_CREATED', refreshDetachedNoteWindows),
     eventBus.subscribe('NOTE_UPDATED', refreshDetachedNoteWindows),
@@ -112,7 +141,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app-wrapper" :class="{ 'is-utools': isUTools() }">
+  <div class="app-wrapper">
     <Dashboard />
     <ImagePreviewModal />
     <NotePreviewModal />
@@ -121,18 +150,20 @@ onUnmounted(() => {
 
 <style lang="scss">
 .app-wrapper {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
-  border-radius: 16px;
-  border: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  background-color: #181b24;
+  background: linear-gradient(135deg, var(--bg-gradient-start, #1e222e) 0%, var(--bg-gradient-end, #141720) 100%);
+  border-radius: $window-radius;
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.08));
   box-sizing: border-box;
 
-  &.is-utools {
-    border-radius: 0;
-    border: none;
-    background: transparent;
+  .dashboard-layout {
+    flex: 1;
+    min-height: 0;
   }
 }
 </style>

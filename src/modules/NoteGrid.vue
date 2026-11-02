@@ -4,8 +4,11 @@ import { useStickyNotesStore } from '@stores/stickyNotes';
 import NoteCard from './NoteCard/NoteCard.vue';
 import { StickyNote, SearchX, Plus } from '@lucide/vue';
 import { useDragAutoScroll } from '@utils/useDragAutoScroll';
+import { useResponsive } from '@utils/useResponsive';
+import { useVirtualGrid } from '@utils/useVirtualGrid';
 
 const store = useStickyNotesStore();
+const { isMobile } = useResponsive();
 
 const containerRef = ref<HTMLElement | null>(null);
 
@@ -13,14 +16,17 @@ const { handleDragOver: handleDragScroll, stopScroll: stopDragScroll } = useDrag
 
 watch(() => store.draggedNoteId, (newId) => {
   if (newId) {
+    window.addEventListener('pointermove', handleDragScroll);
     window.addEventListener('dragover', handleDragScroll);
   } else {
+    window.removeEventListener('pointermove', handleDragScroll);
     window.removeEventListener('dragover', handleDragScroll);
     stopDragScroll();
   }
 });
 
 onUnmounted(() => {
+  window.removeEventListener('pointermove', handleDragScroll);
   window.removeEventListener('dragover', handleDragScroll);
   stopDragScroll();
 });
@@ -34,22 +40,31 @@ const actualColumns = computed(() => {
   return store.gridColumns;
 });
 
-// 动态网格样式
+// 动态网格样式（原生直出/少量数据模式使用）
 const gridStyle = computed(() => {
-  if (actualColumns.value === 'auto') {
-    const minWidth = Math.max(100, Math.min(1000, store.minNoteWidth || 260));
+  // 固定列数：严格按用户显式设置等分，无论桌面端还是移动端
+  if (actualColumns.value !== 'auto') {
+    const cols = actualColumns.value;
     return {
-      gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${minWidth}px), 1fr))`,
-      // 自适应列数未知，离场动画宽度回退为近似值
-      '--leave-card-width': `${minWidth}px`
+      gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+      // 离场 absolute 时按列数均分，保持与网格轨道一致
+      '--leave-card-width': `calc((100% - (var(--grid-gap, 20px) * ${cols - 1})) / ${cols})`
     } as Record<string, string>;
   }
-  // 固定列数：在容器宽度内等分（minmax(0, 1fr) 允许压缩，忽略内容 min-content / 最小宽度）
-  const cols = actualColumns.value;
+
+  // 自适应模式 (auto)：移动端/小屏兜底为单列信息流，桌面端按 minNoteWidth 自适应排列
+  if (isMobile.value) {
+    return {
+      gridTemplateColumns: '1fr',
+      '--leave-card-width': '100%'
+    } as Record<string, string>;
+  }
+
+  const minWidth = Math.max(100, Math.min(1000, store.minNoteWidth || 260));
   return {
-    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-    // 离场 absolute 时按列数均分，保持与网格轨道一致
-    '--leave-card-width': `calc((100% - (var(--grid-gap, 20px) * ${cols - 1})) / ${cols})`
+    gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${minWidth}px), 1fr))`,
+    // 自适应列数未知，离场动画宽度回退为近似值
+    '--leave-card-width': `${minWidth}px`
   } as Record<string, string>;
 });
 
@@ -58,6 +73,36 @@ const handleAddNote = () => {
   store.addNote(store.currentCategoryId, '', '');
   store.showToast('已新建空便签，可以直接编辑');
 };
+
+// 虚拟网格调度逻辑（大数据量时激活，保证首屏秒开与滚动条精准性）
+const {
+  isVirtualGrid,
+  rows,
+  visibleRows,
+  totalVirtualHeight,
+  startOffsetY,
+  registerRowElement,
+  rowGridStyle
+} = useVirtualGrid({
+  items: computed(() => store.filteredNotes),
+  containerRef,
+  gridColumns: computed(() => store.gridColumns),
+  minItemWidth: computed(() => store.minNoteWidth || 260),
+  estimatedItemHeight: computed(() => 210),
+  bufferRows: 3,
+  threshold: 15,
+  isMobile
+});
+
+// 新建便签时自动平滑滚动回顶部，确保新便签处于可见编辑区域
+watch(
+  () => store.editingNoteId,
+  (newId) => {
+    if (newId && store.filteredNotes[0]?.id === newId && containerRef.value) {
+      containerRef.value.scrollTop = 0;
+    }
+  }
+);
 </script>
 
 <template>
@@ -85,16 +130,55 @@ const handleAddNote = () => {
         }}
       </p>
 
-      <button v-if="!store.searchQuery && store.currentCategoryId !== 'trash' && store.currentCategoryId !== 'recent'" class="create-first-btn" @click="handleAddNote">
+      <button
+        v-if="!store.searchQuery && store.currentCategoryId !== 'trash' && store.currentCategoryId !== 'recent'"
+        class="create-first-btn"
+        @click="handleAddNote"
+      >
         <Plus class="btn-icon" />
         <span>添加第一张便签</span>
       </button>
     </div>
 
-    <!-- 便签网格 -->
-    <TransitionGroup v-else name="notes-list" tag="div" class="notes-grid" :style="gridStyle">
+    <!-- 少数据量直出模式：保留完整的 TransitionGroup FLIP 动画 -->
+    <TransitionGroup
+      v-else-if="!isVirtualGrid"
+      name="notes-list"
+      tag="div"
+      class="notes-grid"
+      :style="gridStyle"
+    >
       <NoteCard v-for="note in store.filteredNotes" :key="note.id" :note="note" />
     </TransitionGroup>
+
+    <!-- 大数据量虚拟网格模式：行级虚拟化挂载，支撑真实原生滚动条总长并杜绝卡顿 -->
+    <div
+      v-else
+      class="virtual-grid-wrapper"
+      :style="{ height: `${totalVirtualHeight}px` }"
+    >
+      <div
+        class="virtual-grid-content"
+        :style="{ transform: `translateY(${startOffsetY}px)` }"
+      >
+        <div
+          v-for="row in visibleRows"
+          :key="row.key"
+          :ref="el => registerRowElement(row.rowIndex, el as HTMLElement | null)"
+          class="notes-grid-row"
+          :style="[
+            rowGridStyle,
+            row.rowIndex === rows.length - 1 ? { marginBottom: '0px' } : {}
+          ]"
+        >
+          <NoteCard
+            v-for="note in row.items"
+            :key="note.id"
+            :note="note"
+          />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -103,6 +187,7 @@ const handleAddNote = () => {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  overflow-anchor: none;
   height: calc(100% - 71px); // 减去头部工具栏的高度
 }
 
@@ -115,8 +200,39 @@ const handleAddNote = () => {
   width: 100%;
   box-sizing: border-box;
   position: relative;
+  overflow-anchor: none;
 
   // 允许网格项收缩，避免内容 min-content 把个别列撑宽
+  > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+.virtual-grid-wrapper {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-anchor: none;
+}
+
+.virtual-grid-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  will-change: transform;
+  overflow-anchor: none;
+}
+
+.notes-grid-row {
+  display: grid;
+  align-content: start;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-anchor: none;
+
   > * {
     min-width: 0;
     max-width: 100%;
@@ -237,6 +353,24 @@ const handleAddNote = () => {
     gap: 12px;
     --grid-gap: 12px;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+}
+
+@media (max-width: $screen-mobile) {
+  .note-grid-container {
+    padding: 10px 12px calc(76px + env(safe-area-inset-bottom, 0px)) 12px !important;
+    height: calc(100% - 52px) !important;
+  }
+
+  .notes-grid {
+    grid-template-columns: 1fr;
+    gap: 12px !important;
+    --grid-gap: 12px !important;
+  }
+
+  .notes-list-leave-active {
+    width: var(--leave-card-width, 100%);
+    max-width: 100%;
   }
 }
 </style>

@@ -1,8 +1,8 @@
-import { isUTools } from '@utils/storage';
+import { getToolkitCtx } from '@utils/storage';
 
 export const DETACHED_NOTE_VIEW = 'detached-note';
-export const DETACHED_NOTE_REFRESH_CHANNEL = 'moment-notes:detached-note-refresh';
-export const DETACHED_NOTE_MAXIMIZE_CHANGE_CHANNEL = 'moment-notes:detached-note-maximize-changed';
+export const DETACHED_NOTE_REFRESH_TOPIC = 'moment-notes:detached-note-refresh';
+export const DETACHED_NOTE_CHANGED_TOPIC = 'moment-notes:detached-note-changed';
 
 const DEFAULT_WINDOW_WIDTH = 520;
 const DEFAULT_WINDOW_HEIGHT = 640;
@@ -10,14 +10,20 @@ const DEFAULT_WINDOW_HEIGHT = 640;
 export interface DetachedNoteWindowOptions {
   id: string;
   title?: string;
-  backgroundColor: string;
+  backgroundColor?: string;
 }
 
 export type DetachedNoteWindowOpenResult = 'created' | 'focused' | 'browser' | 'failed';
 
-type DetachedWindowInstance = ReturnType<typeof utools.createBrowserWindow>;
-
-const detachedNoteWindows = new Map<string, DetachedWindowInstance>();
+// 广播信道 (浏览器原生 fallback)
+let broadcastChannel: BroadcastChannel | null = null;
+if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+  try {
+    broadcastChannel = new BroadcastChannel('moment-notes-sync');
+  } catch (e) {
+    console.warn('[BroadcastChannel] not supported:', e);
+  }
+}
 
 export const getDetachedNoteId = (search = window.location.search): string | null => {
   const params = new URLSearchParams(search);
@@ -36,7 +42,6 @@ export const buildDetachedNoteWindowPath = (noteId: string): string => {
     view: DETACHED_NOTE_VIEW,
     noteId
   });
-
   return `index.html?${params.toString()}`;
 };
 
@@ -55,51 +60,6 @@ export const buildDetachedNoteWindowBrowserUrl = (
   return url.toString();
 };
 
-export const buildDetachedNoteWindowUrl = (
-  noteId: string,
-  currentUrl = window.location.href,
-  isDevelopment = import.meta.env.DEV
-): string => {
-  if (!isDevelopment) {
-    return buildDetachedNoteWindowPath(noteId);
-  }
-  return buildDetachedNoteWindowBrowserUrl(noteId, currentUrl);
-};
-
-export const createDetachedNoteWindowOptions = (options: DetachedNoteWindowOptions) => ({
-  show: false,
-  title: options.title?.trim() || '拾光便签',
-  width: DEFAULT_WINDOW_WIDTH,
-  height: DEFAULT_WINDOW_HEIGHT,
-  minWidth: 360,
-  minHeight: 320,
-  center: true,
-  frame: false,
-  transparent: true,
-  backgroundColor: '#00000000',
-  hasShadow: false,
-  roundedCorners: false,
-  resizable: true,
-  minimizable: false,
-  maximizable: true,
-  fullscreenable: true,
-  closable: true,
-  autoHideMenuBar: true,
-  webPreferences: {
-    preload: 'preload/services.js',
-    zoomFactor: 1
-  }
-});
-
-const focusExistingWindow = (noteWindow: DetachedWindowInstance) => {
-  if (noteWindow.isMinimized()) {
-    noteWindow.restore();
-  }
-  noteWindow.show();
-  noteWindow.moveTop();
-  noteWindow.focus?.();
-};
-
 const openBrowserFallback = (options: DetachedNoteWindowOptions): boolean => {
   const noteWindow = window.open(
     buildDetachedNoteWindowBrowserUrl(options.id, window.location.href),
@@ -110,87 +70,134 @@ const openBrowserFallback = (options: DetachedNoteWindowOptions): boolean => {
   return noteWindow !== null;
 };
 
-export const openDetachedNoteWindow = (
+/**
+ * 打开或聚焦独立便签悬浮窗口
+ * 优先在 Toolkit 宿主下调用 ctx.windows.create，浏览器环境下降级为 window.open
+ */
+export const openDetachedNoteWindow = async (
   options: DetachedNoteWindowOptions
-): DetachedNoteWindowOpenResult => {
-  if (!isUTools()) {
-    return openBrowserFallback(options) ? 'browser' : 'failed';
-  }
+): Promise<DetachedNoteWindowOpenResult> => {
+  const ctx = getToolkitCtx();
 
-  const existingWindow = detachedNoteWindows.get(options.id);
-  if (existingWindow && !existingWindow.isDestroyed()) {
-    focusExistingWindow(existingWindow);
-    return 'focused';
-  }
-  detachedNoteWindows.delete(options.id);
-
-  try {
-    let noteWindow: DetachedWindowInstance | null = null;
-    noteWindow = window.utools.createBrowserWindow(
-      buildDetachedNoteWindowPath(options.id),
-      createDetachedNoteWindowOptions(options),
-      () => {
-        if (!noteWindow || noteWindow.isDestroyed()) return;
-        noteWindow.show();
-        noteWindow.moveTop();
-        noteWindow.focus?.();
+  // 1. Toolkit 插件环境
+  if (ctx?.windows) {
+    const label = `plugin-moment-notes-note-${options.id}`;
+    try {
+      const exists = await ctx.windows.exists?.(label);
+      if (exists) {
+        return 'focused';
       }
-    );
 
-    noteWindow.on('maximize', () => {
-      if (!noteWindow || noteWindow.isDestroyed()) return;
-      noteWindow.webContents.send(DETACHED_NOTE_MAXIMIZE_CHANGE_CHANNEL, true);
-    });
+      const url = `pluginwin.html?plugin=${encodeURIComponent(
+        ctx.id || 'custom.moment-notes'
+      )}&label=${encodeURIComponent(label)}&view=${DETACHED_NOTE_VIEW}&noteId=${encodeURIComponent(options.id)}`;
 
-    noteWindow.on('unmaximize', () => {
-      if (!noteWindow || noteWindow.isDestroyed()) return;
-      noteWindow.webContents.send(DETACHED_NOTE_MAXIMIZE_CHANGE_CHANNEL, false);
-    });
+      const res = await ctx.windows.create(label, {
+        url,
+        title: options.title?.trim() || '拾光便签',
+        width: DEFAULT_WINDOW_WIDTH,
+        height: DEFAULT_WINDOW_HEIGHT,
+        transparent: true,
+        decorations: false,
+        shadow: true,
+        alwaysOnTop: true,
+        resizable: true,
+        center: true
+      });
 
-    detachedNoteWindows.set(options.id, noteWindow);
-    return 'created';
-  } catch (error) {
-    console.error('Failed to open detached note window:', error);
-    return 'failed';
-  }
-};
-
-export const refreshDetachedNoteWindows = () => {
-  detachedNoteWindows.forEach((noteWindow, noteId) => {
-    if (noteWindow.isDestroyed()) {
-      detachedNoteWindows.delete(noteId);
-      return;
+      return res === 'created' ? 'created' : 'focused';
+    } catch (err) {
+      console.error('[DetachedNoteWindow] ctx.windows.create failed:', err);
     }
-    noteWindow.webContents.send(DETACHED_NOTE_REFRESH_CHANNEL);
-  });
+  }
+
+  // 2. 如果在二级窗口运行 (bridge 上仅有 bus)，向主窗口发送开窗请求
+  if (ctx?.bus) {
+    try {
+      await ctx.bus.publish('moment-notes:open-window', {
+        type: 'detached',
+        noteId: options.id,
+        title: options.title
+      });
+      return 'created';
+    } catch (e) {
+      console.warn('[DetachedNoteWindow] Failed to request via bus:', e);
+    }
+  }
+
+  // 3. 浏览器降级
+  return openBrowserFallback(options) ? 'browser' : 'failed';
 };
 
-export const setDetachedNoteWindowAlwaysOnTop = (noteId: string, alwaysOnTop: boolean) => {
-  const noteWindow = detachedNoteWindows.get(noteId);
-  if (!noteWindow || noteWindow.isDestroyed()) {
-    detachedNoteWindows.delete(noteId);
-    return;
+/**
+ * 广播便签数据刷新事件至所有独立窗口
+ */
+export const refreshDetachedNoteWindows = () => {
+  const ctx = getToolkitCtx();
+  if (ctx?.bus) {
+    ctx.bus.publish(DETACHED_NOTE_REFRESH_TOPIC, { timestamp: Date.now() }).catch(() => {});
   }
-  noteWindow.setAlwaysOnTop(alwaysOnTop);
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: DETACHED_NOTE_REFRESH_TOPIC, timestamp: Date.now() });
+  }
 };
 
-export const isDetachedNoteWindowMaximized = (noteId: string): boolean => {
-  const noteWindow = detachedNoteWindows.get(noteId);
-  if (!noteWindow || noteWindow.isDestroyed()) return false;
-  return Boolean((noteWindow as any).isMaximized?.());
+/**
+ * 通知主窗口该便签已变更
+ */
+export const notifyDetachedNoteChanged = (noteId: string) => {
+  const ctx = getToolkitCtx();
+  if (ctx?.bus) {
+    ctx.bus.publish(DETACHED_NOTE_CHANGED_TOPIC, { noteId, timestamp: Date.now() }).catch(() => {});
+  }
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: DETACHED_NOTE_CHANGED_TOPIC, noteId, timestamp: Date.now() });
+  }
 };
 
-export const toggleDetachedNoteWindowMaximize = (noteId: string): boolean => {
-  const noteWindow = detachedNoteWindows.get(noteId);
-  if (!noteWindow || noteWindow.isDestroyed()) {
-    detachedNoteWindows.delete(noteId);
-    return false;
+/**
+ * 订阅独立窗口相关广播事件
+ */
+export const subscribeDetachedNoteEvents = (
+  onRefresh: () => void,
+  onChildChanged?: (noteId: string) => void
+): (() => void) => {
+  const disposers: Array<() => void> = [];
+  const ctx = getToolkitCtx();
+
+  if (ctx?.bus) {
+    const unsubRefresh = ctx.bus.subscribe(DETACHED_NOTE_REFRESH_TOPIC, () => {
+      onRefresh();
+    });
+    disposers.push(() => {
+      Promise.resolve(unsubRefresh).then(off => typeof off === 'function' && off()).catch(() => {});
+    });
+
+    if (onChildChanged) {
+      const unsubChanged = ctx.bus.subscribe(DETACHED_NOTE_CHANGED_TOPIC, (env: any) => {
+        const payload = env?.p ?? env?.payload ?? env;
+        const noteId = payload?.noteId;
+        if (noteId) onChildChanged(noteId);
+      });
+      disposers.push(() => {
+        Promise.resolve(unsubChanged).then(off => typeof off === 'function' && off()).catch(() => {});
+      });
+    }
   }
-  if ((noteWindow as any).isMaximized?.()) {
-    noteWindow.unmaximize();
-    return false;
-  } else {
-    noteWindow.maximize();
-    return true;
+
+  if (broadcastChannel) {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === DETACHED_NOTE_REFRESH_TOPIC) {
+        onRefresh();
+      } else if (event.data?.type === DETACHED_NOTE_CHANGED_TOPIC && onChildChanged) {
+        onChildChanged(event.data.noteId);
+      }
+    };
+    broadcastChannel.addEventListener('message', handler);
+    disposers.push(() => broadcastChannel?.removeEventListener('message', handler));
   }
+
+  return () => {
+    disposers.forEach(d => d());
+  };
 };

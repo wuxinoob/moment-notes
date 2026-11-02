@@ -1,80 +1,44 @@
 <script lang="ts" setup>
-import { ref, onUnmounted } from 'vue';
+import { ref } from 'vue';
 import { useStickyNotesStore } from '@stores/stickyNotes';
-import { Settings } from '@lucide/vue';
-import { isUTools } from '@utils/storage';
+import { Settings, X } from '@lucide/vue';
+import { dragCurrentWindow } from '@utils/windowControls';
+import { useSidebarResize } from '@utils/useSidebarResize';
+import logoUrl from '@/assets/logo.png';
 import CategoryList from './CategoryList.vue';
 import CategoryAdd from './CategoryAdd.vue';
 
 const store = useStickyNotesStore();
 const isAddingCategory = ref(false);
 
-// 侧边栏宽度常量
-const DEFAULT_SIDEBAR_WIDTH = 220;
-const MIN_SIDEBAR_WIDTH = 160;
-
-// 侧边栏宽度管理
-const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH);
-const isResizing = ref(false);
-
-// 从本地存储初始化宽度
-const savedWidth = localStorage.getItem('sidebar-width');
-if (savedWidth) {
-  const width = parseInt(savedWidth, 10);
-  if (!isNaN(width) && width >= MIN_SIDEBAR_WIDTH) {
-    sidebarWidth.value = width;
-  }
-}
-
-const startResize = (e: MouseEvent) => {
-  e.preventDefault();
-  isResizing.value = true;
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-
-  window.addEventListener('mousemove', handleResize);
-  window.addEventListener('mouseup', stopResize);
+const handleHeaderDrag = (e: MouseEvent) => {
+  dragCurrentWindow(e);
 };
 
-const handleResize = (e: MouseEvent) => {
-  if (!isResizing.value) return;
-  let newWidth = e.clientX;
-  if (newWidth < MIN_SIDEBAR_WIDTH) {
-    newWidth = MIN_SIDEBAR_WIDTH;
-  }
-  // 限制最大宽度为窗口宽度的 50%
-  const maxWidth = window.innerWidth * 0.5;
-  if (newWidth > maxWidth) {
-    newWidth = maxWidth;
-  }
-  sidebarWidth.value = newWidth;
-};
-
-const stopResize = () => {
-  if (!isResizing.value) return;
-  isResizing.value = false;
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
-
-  localStorage.setItem('sidebar-width', sidebarWidth.value.toString());
-
-  window.removeEventListener('mousemove', handleResize);
-  window.removeEventListener('mouseup', stopResize);
-};
-
-onUnmounted(() => {
-  window.removeEventListener('mousemove', handleResize);
-  window.removeEventListener('mouseup', stopResize);
-});
+// 侧边栏拖拽尺寸与持久化
+const { sidebarWidth, isResizing, startResize } = useSidebarResize();
 </script>
 
 <template>
-  <aside class="sidebar-container" :style="{ width: sidebarWidth + 'px' }">
-    <div v-if="!isUTools()" class="sidebar-header">
-      <img src="/logo.png" class="logo" alt="logo" />
-      <h2 class="header-title">
-        拾光便签
-      </h2>
+  <aside
+    class="sidebar-container"
+    :class="{ 'mobile-open': store.isMobileSidebarOpen }"
+    :style="{ width: sidebarWidth + 'px' }"
+  >
+    <div class="sidebar-header" data-tauri-drag-region @mousedown="handleHeaderDrag">
+      <div class="sidebar-brand" data-tauri-drag-region>
+        <img :src="logoUrl" class="logo" alt="logo" data-tauri-drag-region />
+        <h2 class="header-title" data-tauri-drag-region>
+          拾光便签
+        </h2>
+      </div>
+      <button
+        class="mobile-sidebar-close"
+        aria-label="关闭侧边栏"
+        @click="store.closeMobileSidebar"
+      >
+        <X class="close-icon" />
+      </button>
     </div>
 
     <!-- 分类列表区域 -->
@@ -120,10 +84,17 @@ onUnmounted(() => {
   padding-bottom: 0;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   -webkit-app-region: drag;
   user-select: none;
+
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
 
   .logo {
     width: 30px;
@@ -138,6 +109,10 @@ onUnmounted(() => {
     color: var(--text-primary);
     letter-spacing: 0.5px;
   }
+}
+
+.mobile-sidebar-close {
+  display: none;
 }
 
 .sidebar-footer {
@@ -252,6 +227,63 @@ onUnmounted(() => {
       width: 14px;
       height: 14px;
     }
+  }
+}
+
+@media (max-width: $screen-mobile) {
+  .sidebar-container {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 82vw) !important;
+    height: 100% !important;
+    z-index: $z-index-modal-level1 !important;
+    transform: translateX(-100%);
+    transition: transform $transition-normal;
+    box-shadow: none;
+    background: var(--drawer-bg, rgba(18, 24, 38, 0.95)) !important;
+    backdrop-filter: var(--glass-blur-heavy, blur(28px) saturate(190%));
+    -webkit-backdrop-filter: var(--glass-blur-heavy, blur(28px) saturate(190%));
+    border-right: 1px solid var(--panel-border);
+
+    &.mobile-open {
+      transform: translateX(0);
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.55);
+    }
+  }
+
+  .sidebar-header {
+    padding: 16px 14px 12px 14px;
+  }
+
+  .mobile-sidebar-close {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+
+    &:hover,
+    &:active {
+      background: var(--btn-hover-bg);
+      color: var(--text-primary);
+    }
+
+    .close-icon {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .resize-handle {
+    display: none !important;
   }
 }
 </style>

@@ -335,6 +335,7 @@ const vFocusSelect = {
 
     .item-actions {
       opacity: 1;
+      pointer-events: auto;
       transform: translateX(0);
     }
   }
@@ -415,6 +416,7 @@ const vFocusSelect = {
   position: absolute;
   right: 0;
   opacity: 0;
+  pointer-events: none;
   transform: translateX(10px);
   transition:
     opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1),

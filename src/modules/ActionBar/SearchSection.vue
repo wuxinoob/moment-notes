@@ -436,4 +436,16 @@ onUnmounted(() => {
     }
   }
 }
+
+@media (max-width: $screen-mobile) {
+  .search-section {
+    max-width: none !important;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .search-wrapper {
+    height: 34px;
+  }
+}
 </style>

@@ -39,6 +39,11 @@
     :deep(.card-footer) {
       opacity: 1;
 
+      &.has-active-popover {
+        overflow: visible;
+        z-index: 20;
+      }
+
       .card-actions {
         opacity: 1;
         max-width: 160px;
@@ -47,6 +52,7 @@
 
         &.has-active-popover {
           overflow: visible;
+          z-index: 21;
         }
       }
     }
@@ -71,57 +77,82 @@
   }
 
   &.has-active-popover {
-    z-index: 10;
+    z-index: 30;
+
+    :deep(.card-footer) {
+      opacity: 1;
+      overflow: visible;
+      z-index: 20;
+
+      .card-actions {
+        opacity: 1;
+        max-width: 160px;
+        pointer-events: auto;
+        overflow: visible;
+        z-index: 21;
+      }
+    }
   }
 
   &.dragging {
-    opacity: 0.35;
+    opacity: 0.45;
     border-style: dashed !important;
     transform: scale(0.98);
     box-shadow: none !important;
   }
 
-  &[draggable='true'] {
-    cursor: default;
-
-    &:active {
-      cursor: default;
-    }
-  }
-
   .note-drag-handle {
     position: absolute;
     top: 0;
-    left: 0;
-    right: 0;
-    height: 16px;
-    z-index: 1;
-    cursor: default;
-    border-radius: $radius-xl $radius-xl 0 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 20px;
+    z-index: 2;
+    cursor: grab;
+    touch-action: none;
+    border-radius: 0 0 $radius-md $radius-md;
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s ease;
+    user-select: none;
+    -webkit-user-select: none;
 
     &::after {
       content: '';
-      width: 24px;
+      width: 32px;
       height: 3px;
-      border-radius: 1.5px;
+      border-radius: 2px;
       background: currentColor;
-      opacity: 0;
-      margin-top: 3.5px;
-      transition: opacity 0.2s;
+      opacity: 0.2;
+      margin-top: 5px;
+      transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
     &:hover {
+      background-color: rgba(0, 0, 0, 0.04);
+
       &::after {
-        opacity: 0.15;
+        opacity: 0.5;
+        transform: scaleX(1.15);
+      }
+
+      .dark-theme & {
+        background-color: rgba(255, 255, 255, 0.05);
+
+        &::after {
+          opacity: 0.6;
+        }
       }
     }
 
     &:active {
-      cursor: default;
+      cursor: grabbing;
+
+      &::after {
+        opacity: 0.8;
+      }
     }
   }
 
@@ -198,6 +229,11 @@
     :deep(.card-footer) {
       opacity: 1;
       padding-top: 12px;
+
+      &.has-active-popover {
+        overflow: visible !important;
+        z-index: 20 !important;
+      }
     }
 
     :deep(.card-meta-info) {
@@ -238,5 +274,62 @@
   .note-card {
     padding: 14px 16px 8px 16px;
     min-height: 80px;
+  }
+}
+
+@media (max-width: $screen-mobile) {
+  .note-card {
+    padding: 14px 14px 8px 14px;
+    border-radius: $radius-lg;
+
+    :deep(.edit-trigger-btn) {
+      opacity: 0.85;
+    }
+
+    :deep(.card-footer) {
+      opacity: 1;
+
+      .card-actions {
+        opacity: 1;
+        max-width: 180px;
+        pointer-events: auto;
+        overflow: visible;
+      }
+    }
+
+    :deep(.action-btn) {
+      width: 24px;
+      height: 24px;
+
+      .action-icon {
+        width: 13px;
+        height: 13px;
+      }
+    }
+
+    &.is-full-screen {
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: 100vw !important;
+      max-height: 100vh !important;
+      border-radius: 0 !important;
+      padding: 16px 14px calc(16px + env(safe-area-inset-bottom, 0px)) 14px !important;
+    }
+  }
+}
+
+:global(.note-card-drag-ghost) {
+  position: fixed !important;
+  pointer-events: none !important;
+  z-index: 999999 !important;
+  opacity: 0.94 !important;
+  transform: scale(1.03) rotate(1deg) !important;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.28), 0 8px 18px rgba(0, 0, 0, 0.16) !important;
+  cursor: grabbing !important;
+  transition: none !important;
+  animation: none !important;
+
+  .note-drag-handle {
+    cursor: grabbing !important;
   }
 }

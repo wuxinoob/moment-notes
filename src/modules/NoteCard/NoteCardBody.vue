@@ -3,8 +3,8 @@ import { ref, watch, nextTick } from 'vue';
 import { Note } from '@type';
 import { useStickyNotesStore } from '@stores/stickyNotes';
 import { useShortcutStore } from '@stores/shortcutStore';
-import { isUTools } from '@utils/storage';
 import { useNoteTagMeasure } from '@utils/useNoteTagMeasure';
+import { getFilesFromEvent, processAttachmentFile } from '@utils/imageHandler';
 import MarkdownRenderer from './MarkdownRenderer.vue';
 
 const props = withDefaults(
@@ -23,10 +23,131 @@ const content = defineModel<string>('content', { default: '' });
 const emit = defineEmits<{
   (e: 'cancel-edit'): void;
   (e: 'save-edit'): void;
+  (e: 'switch-to-markdown'): void;
 }>();
 
 const store = useStickyNotesStore();
 const shortcutStore = useShortcutStore();
+
+const contentInputRef = ref<HTMLTextAreaElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const isDragOver = ref(false);
+
+// 插入多个文件 (图片、音频、视频、文档附件)
+const insertFiles = async (files: File[]) => {
+  if (!files || files.length === 0) return;
+
+  try {
+    store.showToast(files.length > 1 ? `正在处理 ${files.length} 个附件...` : '正在处理附件...', 'info');
+
+    const markdownSnippets: string[] = [];
+    for (const file of files) {
+      const result = await processAttachmentFile(file);
+      markdownSnippets.push(result.markdownText);
+    }
+    const combinedMarkdown = markdownSnippets.join('\n');
+
+    emit('switch-to-markdown');
+
+    if (props.isEditing) {
+      const textarea = contentInputRef.value;
+      if (textarea) {
+        const start = textarea.selectionStart ?? content.value.length;
+        const end = textarea.selectionEnd ?? content.value.length;
+        const currentVal = content.value || '';
+        const newVal = currentVal.substring(0, start) + combinedMarkdown + currentVal.substring(end);
+        content.value = newVal;
+
+        await nextTick();
+        const newCursorPos = start + combinedMarkdown.length;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        adjustTextareaHeight();
+      } else {
+        content.value = (content.value || '') + combinedMarkdown;
+      }
+    } else {
+      // 浏览模式下直接向便签追加附件
+      const updatedContent = (props.note.content ? `${props.note.content}\n` : '') + combinedMarkdown.trim();
+      store.updateNote(props.note.id, {
+        content: updatedContent,
+        type: 'markdown'
+      });
+    }
+
+    store.showToast(files.length > 1 ? `已插入 ${files.length} 个附件` : '附件已插入', 'success');
+  } catch (err: any) {
+    console.error('Failed to process files:', err);
+    store.showToast(`附件处理失败: ${err.message || '未知异常'}`, 'error');
+  }
+};
+
+// 触发隐藏的本地文件选择弹窗
+const triggerFileInput = () => {
+  if (typeof window !== 'undefined') {
+    (window as any).__isFileDialogActive = true;
+  }
+  fileInputRef.value?.click();
+};
+
+const handleFileInputChange = async (e: Event) => {
+  if (typeof window !== 'undefined') {
+    window.setTimeout(() => {
+      (window as any).__isFileDialogActive = false;
+    }, 500);
+  }
+  const input = e.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  const files = Array.from(input.files);
+  input.value = ''; // 重置以支持重复选择相同文件
+  await insertFiles(files);
+};
+
+const handleFileInputCancel = () => {
+  if (typeof window !== 'undefined') {
+    window.setTimeout(() => {
+      (window as any).__isFileDialogActive = false;
+    }, 300);
+  }
+};
+
+// 处理粘贴文件 (图片、音频、文档等)
+const handlePaste = async (e: ClipboardEvent) => {
+  const files = getFilesFromEvent(e);
+  if (!files || files.length === 0) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  await insertFiles(files);
+};
+
+// 处理拖拽文件悬浮
+const handleDragOver = (e: DragEvent) => {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    isDragOver.value = true;
+  }
+};
+
+const handleDragLeave = (e: DragEvent) => {
+  if (!e.currentTarget || !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+    isDragOver.value = false;
+  }
+};
+
+// 处理拖拽文件放下
+const handleDrop = async (e: DragEvent) => {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragOver.value = false;
+    const files = getFilesFromEvent(e);
+    if (files.length > 0) {
+      await insertFiles(files);
+    }
+  }
+};
 
 const handleKeyDown = (e: KeyboardEvent) => {
   const keyString = shortcutStore.getEventKeyString(e);
@@ -49,19 +170,13 @@ const handleKeyDown = (e: KeyboardEvent) => {
 // 复制标签逻辑
 const copyTag = async (tag: string) => {
   try {
-    if (isUTools()) {
-      window.utools.copyText(tag);
-    } else {
-      await navigator.clipboard.writeText(tag);
-    }
+    await navigator.clipboard.writeText(tag);
     store.showToast(`已复制标签: ${tag}`, 'success');
   } catch (err) {
     console.error('Failed to copy tag:', err);
     store.showToast('复制失败', 'error');
   }
 };
-
-const contentInputRef = ref<HTMLTextAreaElement | null>(null);
 
 // 自适应调整输入框高度
 const adjustTextareaHeight = () => {
@@ -95,22 +210,45 @@ watch(
     }
   }
 );
+
+defineExpose({
+  triggerFileInput
+});
 </script>
 
 <template>
   <div
     class="card-body"
-    :class="{ 'is-view-mode': !isEditing, 'is-full-screen': isFullScreen }"
+    :class="{
+      'is-view-mode': !isEditing,
+      'is-full-screen': isFullScreen,
+      'is-drag-over': isDragOver
+    }"
+    @paste="handlePaste"
+    @dragover="handleDragOver"
+    @dragleave="handleDragLeave"
+    @drop="handleDrop"
   >
+    <!-- 隐藏的通用附件文件选择器 -->
+    <input
+      ref="fileInputRef"
+      type="file"
+      multiple
+      style="display: none"
+      @change="handleFileInputChange"
+      @cancel="handleFileInputCancel"
+    />
+
     <textarea
       v-if="isEditing"
       ref="contentInputRef"
       v-model="content"
-      :placeholder="note.type === 'markdown' ? '输入 Markdown 源码...' : '写点什么...'"
+      :placeholder="note.type === 'markdown' ? '输入 Markdown 源码，支持粘贴/拖放图片及附件...' : '写点什么...'"
       class="content-textarea"
       :class="{ 'is-full-screen': isFullScreen }"
       @keydown="handleKeyDown"
       @input="adjustTextareaHeight"
+      @paste="handlePaste"
     ></textarea>
     <template v-else>
       <div class="card-body-content">
@@ -163,9 +301,17 @@ watch(
   position: relative;
   display: flex;
   flex-direction: column;
+  transition: background-color 0.2s ease, outline 0.2s ease;
 
   &.is-view-mode {
     overflow: hidden;
+  }
+
+  &.is-drag-over {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: -2px;
+    border-radius: 6px;
+    background: rgba(var(--accent-color, 100, 100, 255), 0.06);
   }
 }
 
@@ -208,7 +354,6 @@ watch(
     }
   }
 
-  // 1. 默认显示极其清淡淡雅的半透明颜色，既保持视觉纯净，又避开了 Chromium 隐藏滚动条不响应 hover 重绘的缺陷
   &::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.04);
     border-radius: 4px;
@@ -218,7 +363,6 @@ watch(
     }
   }
 
-  // --- 暗色主题适配 (类切换) ---
   .dark-theme &::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.04);
 
@@ -227,7 +371,6 @@ watch(
     }
   }
 
-  // --- 针对系统自带暗色模式偏好的处理 ---
   @media (prefers-color-scheme: dark) {
     &::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.04);
@@ -237,7 +380,6 @@ watch(
       }
     }
 
-    // 系统是暗色，但手动切换为了亮色主题
     .light-theme &::-webkit-scrollbar-thumb {
       background: rgba(0, 0, 0, 0.04);
 
@@ -299,6 +441,13 @@ watch(
     .dark-theme & {
       border-color: var(--card-border-dark);
     }
+  }
+
+  &.is-drag-over,
+  &.is-dragging-over {
+    border-color: var(--accent-color) !important;
+    border-style: dashed !important;
+    background: rgba(99, 102, 241, 0.08) !important;
   }
 }
 

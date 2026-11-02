@@ -24,7 +24,6 @@
       "@views/*": ["./src/views/*"]
     },
     "types": [
-      "utools-api-types",
       "node"
     ]
   },

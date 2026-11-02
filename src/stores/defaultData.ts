@@ -6,7 +6,9 @@ export const getDefaultCategories = (): Category[] => [
   { id: '3', name: '灵感想法', createdAt: Date.now() - 2000 }
 ];
 
-export const getDefaultNotes = (): Note[] => [
+export const getDefaultNotes = (): Note[] => [];
+
+export const SAMPLE_NOTES: Note[] = [
   {
     id: 'n1',
     categoryId: 'uncategorized',

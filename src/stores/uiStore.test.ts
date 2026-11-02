@@ -3,11 +3,13 @@ import { setActivePinia, createPinia } from 'pinia';
 import { useUiStore } from './uiStore';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { clearStorageMemoryCache } from '@utils/storage';
 
 describe('uiStore 持久化与规范单测', () => {
   let storeMap: Map<string, string>;
 
   beforeEach(() => {
+    clearStorageMemoryCache();
     setActivePinia(createPinia());
     storeMap = new Map<string, string>();
     globalThis.localStorage = {
@@ -25,11 +27,7 @@ describe('uiStore 持久化与规范单测', () => {
     const source = await readFile(uiStorePath, 'utf8');
 
     const storedThemeIdx = source.indexOf("const storedTheme = storage.getItem('sticky_notes_theme');");
-    const utoolsEnvIdx = source.indexOf('else if (isUtoolsEnv)');
-
     expect(storedThemeIdx).not.toBe(-1);
-    expect(utoolsEnvIdx).not.toBe(-1);
-    expect(storedThemeIdx).toBeLessThan(utoolsEnvIdx);
   });
 
   it('doubleClickNoteAction 默认应为 copyAndPaste 并支持变更', () => {

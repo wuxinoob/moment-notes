@@ -1,3 +1,4 @@
+@use 'sass:math';
 @use 'variables' as *;
 
 // 半透明背景混入
@@ -23,7 +24,10 @@
 }
 
 // Hover 悬浮浮起动效
+// transform 不占布局，指针贴在底边时卡片上浮会让 hover 落空并反复触发。
+// 上浮后用伪元素补回原底部命中区，避免抖动。
 @mixin hover-lift($translateY: -4px, $shadow: var(--shadow-md)) {
+  position: relative;
   transition:
     transform $transition-slow,
     box-shadow $transition-slow;
@@ -31,6 +35,16 @@
   &:hover {
     transform: translate3d(0, $translateY, 0);
     box-shadow: $shadow;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: math.abs($translateY);
+      pointer-events: auto;
+    }
   }
 }
 
@@ -119,6 +133,25 @@
 
 @mixin respond-mobile {
   @media (max-width: $screen-mobile) { @content; }
+}
+
+// 触控交互特性混入 (精准检测触摸屏粗指针，脱离纯像素猜测)
+@mixin touch-device {
+  @media (pointer: coarse) and (hover: none) {
+    @content;
+  }
+}
+
+// 高精度悬浮交互混入 (鼠标设备)
+@mixin hover-device {
+  @media (hover: hover) and (pointer: fine) {
+    @content;
+  }
+}
+
+// 移动端安全区底部填充混入
+@mixin safe-area-bottom($offset: 0px) {
+  padding-bottom: calc(#{$offset} + env(safe-area-inset-bottom, 0px));
 }
 
 

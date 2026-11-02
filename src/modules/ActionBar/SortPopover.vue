@@ -4,9 +4,15 @@ import { ArrowUpDown } from '@lucide/vue';
 
 const store = useStickyNotesStore();
 
-defineProps<{
-  isOpen: boolean;
-}>();
+withDefaults(
+  defineProps<{
+    isOpen: boolean;
+    placement?: 'top' | 'bottom';
+  }>(),
+  {
+    placement: 'bottom'
+  }
+);
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
@@ -45,7 +51,7 @@ const changeSortMode = (mode: 'date' | 'title' | 'tag' | 'custom' | 'useCount') 
       <ArrowUpDown class="btn-icon" />
     </button>
 
-    <div v-if="isOpen" class="sort-popover">
+    <div v-if="isOpen" :class="['sort-popover', `placement-${placement}`]">
       <div class="popover-title">
         排序方式
       </div>
@@ -169,6 +175,23 @@ const changeSortMode = (mode: 'date' | 'title' | 'tag' | 'custom' | 'useCount') 
     color: var(--text-muted);
     margin-bottom: 6px;
     padding: 0 4px;
+  }
+
+  &.placement-top {
+    top: auto;
+    bottom: calc(100% + 8px);
+    animation: popoverFadeInUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+@keyframes popoverFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

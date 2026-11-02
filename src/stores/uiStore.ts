@@ -115,25 +115,24 @@ export const useUiStore = defineStore('uiStore', () => {
     if (dark) {
       root.classList.remove('light-theme');
       root.classList.add('dark-theme');
+      root.dataset.theme = 'dark';
+      root.style.colorScheme = 'dark';
     } else {
       root.classList.remove('dark-theme');
       root.classList.add('light-theme');
+      root.dataset.theme = 'light';
+      root.style.colorScheme = 'light';
     }
   };
 
-  const initTheme = (isUtoolsEnv: boolean) => {
+  const initTheme = () => {
     const storedTheme = storage.getItem('sticky_notes_theme');
     if (storedTheme) {
       isDark.value = storedTheme === 'dark';
-    } else if (isUtoolsEnv) {
-      try {
-        isDark.value = window.utools.isDarkColors();
-      } catch (e) {
-        console.error('Failed to get theme from uTools:', e);
-        isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      }
+    } else if (typeof document !== 'undefined' && document.documentElement.dataset.theme) {
+      isDark.value = document.documentElement.dataset.theme === 'dark';
     } else {
-      isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      isDark.value = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
     }
     applyTheme(isDark.value);
   };
@@ -248,6 +247,21 @@ export const useUiStore = defineStore('uiStore', () => {
     storage.setItem('sticky_notes_enable_immersive_fullscreen', val ? 'true' : 'false');
   };
 
+  // 移动端侧边栏抽屉展开状态
+  const isMobileSidebarOpen = ref(false);
+
+  const openMobileSidebar = () => {
+    isMobileSidebarOpen.value = true;
+  };
+
+  const closeMobileSidebar = () => {
+    isMobileSidebarOpen.value = false;
+  };
+
+  const toggleMobileSidebar = () => {
+    isMobileSidebarOpen.value = !isMobileSidebarOpen.value;
+  };
+
   // 全屏便签预览状态
   const previewNoteId = ref<string | null>(null);
   const openedFullscreenForEditNoteId = ref<string | null>(null);
@@ -347,6 +361,10 @@ export const useUiStore = defineStore('uiStore', () => {
     openNotePreview,
     closeNotePreview,
     toggleNotePreview,
+    isMobileSidebarOpen,
+    openMobileSidebar,
+    closeMobileSidebar,
+    toggleMobileSidebar,
     showExportModal,
     openExportModal,
     closeExportModal,

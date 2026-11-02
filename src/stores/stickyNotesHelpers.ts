@@ -1,5 +1,7 @@
 import { Category, Note, AppSettings, BackupData, ExportOptions, ImportOptions } from '@type';
-import { storage, downloadOrWriteFile, isUTools } from '@utils/storage';
+import { storage, downloadOrWriteFile } from '@utils/storage';
+import { extractAssetIdsFromMarkdown } from '@utils/imageProcessing';
+import { imageAssetService } from '../domain/assets/ImageAssetService';
 import { getDefaultNotes } from './defaultData';
 
 export { getDefaultNotes };
@@ -11,14 +13,16 @@ export const createBackupData = (
   categories: Category[],
   notes: Note[],
   settings?: AppSettings,
-  versionOverride?: string
+  versionOverride?: string,
+  assets?: Record<string, { mime: string; data: string }>
 ): BackupData => {
   return {
     version: versionOverride || __APP_VERSION__,
     timestamp: Date.now(),
     categories,
     notes,
-    ...(settings ? { settings } : {})
+    ...(settings ? { settings } : {}),
+    ...(assets && Object.keys(assets).length > 0 ? { assets } : {})
   };
 };
 
@@ -27,7 +31,6 @@ export const checkAndAutoBackupPreUpdate = (
   notes: Note[],
   settings?: AppSettings
 ) => {
-  if (!isUTools()) return;
 
   const currentVersion = __APP_VERSION__;
   const storedVersion = storage.getItem('sticky_notes_app_version');
@@ -45,13 +48,14 @@ export const checkAndAutoBackupPreUpdate = (
   storage.setItem('sticky_notes_app_version', currentVersion);
 };
 
-export const exportBackup = (
+export const exportBackup = async (
   categories: Category[],
   notes: Note[],
   settings: AppSettings,
   showToast: (msg: string, type?: any) => void
 ) => {
-  const backupData = createBackupData(categories, notes, settings);
+  const assets = await imageAssetService.exportAssetsForNotes(notes);
+  const backupData = createBackupData(categories, notes, settings, undefined, assets);
 
   const jsonStr = JSON.stringify(backupData, null, 2);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -69,7 +73,7 @@ export const exportBackup = (
   }
 };
 
-export const exportSelectedBackup = (
+export const exportSelectedBackup = async (
   categories: Category[],
   notes: Note[],
   settings: AppSettings,
@@ -88,10 +92,13 @@ export const exportSelectedBackup = (
     return selectedCatSet.has('all') || selectedCatSet.has('uncategorized');
   });
 
+  const assets = await imageAssetService.exportAssetsForNotes(filteredNotes);
   const backupData = createBackupData(
     filteredCategories,
     filteredNotes,
-    options.includeSettings ? settings : undefined
+    options.includeSettings ? settings : undefined,
+    undefined,
+    assets
   );
 
   const jsonStr = JSON.stringify(backupData, null, 2);
@@ -110,7 +117,7 @@ export const exportSelectedBackup = (
   }
 };
 
-export const importBackup = (
+export const importBackup = async (
   jsonStr: string,
   categories: { value: Category[] },
   notes: { value: Note[] },
@@ -120,7 +127,7 @@ export const importBackup = (
   saveCategoryOrder: () => void,
   showToast: (msg: string, type?: any) => void,
   applySettings?: (settings: AppSettings) => void
-): boolean => {
+): Promise<boolean> => {
   try {
     const data = JSON.parse(jsonStr);
 
@@ -211,6 +218,14 @@ export const importBackup = (
       saveCategoryOrder();
     }
 
+    if (data.assets && typeof data.assets === 'object') {
+      try {
+        await imageAssetService.importAssets(data.assets);
+      } catch (err) {
+        console.warn('Import image assets error:', err);
+      }
+    }
+
     if (hasSettings && applySettings) {
       applySettings(data.settings);
     }
@@ -229,7 +244,7 @@ export const importBackup = (
   }
 };
 
-export const importSelectedBackup = (
+export const importSelectedBackup = async (
   data: BackupData,
   options: ImportOptions,
   categoriesRef: { value: Category[] },
@@ -240,7 +255,7 @@ export const importSelectedBackup = (
   saveCategoryOrder: () => void,
   showToast: (msg: string, type?: any) => void,
   applySettings?: (settings: AppSettings) => void
-): boolean => {
+): Promise<boolean> => {
   try {
     if (!data || typeof data !== 'object') return false;
 
@@ -360,6 +375,30 @@ export const importSelectedBackup = (
     categoryOrderRef.value = newOrder;
     saveCategoryOrder();
 
+    if (data.assets && typeof data.assets === 'object') {
+      try {
+        const activeAssetIds = new Set<string>();
+        notesToImport.forEach((n: any) => {
+          if (n.content) {
+            extractAssetIdsFromMarkdown(n.content).forEach(id => activeAssetIds.add(id));
+          }
+        });
+
+        const assetsToImport: Record<string, any> = {};
+        for (const [id, item] of Object.entries(data.assets)) {
+          if (activeAssetIds.has(id)) {
+            assetsToImport[id] = item;
+          }
+        }
+
+        if (Object.keys(assetsToImport).length > 0) {
+          await imageAssetService.importAssets(assetsToImport);
+        }
+      } catch (err) {
+        console.warn('Import image assets error:', err);
+      }
+    }
+
     if (hasSettings && applySettings && data.settings) {
       applySettings(data.settings);
     }
@@ -439,3 +478,86 @@ export const devResetAllData = (
   loadData();
   showToast('已重置所有数据(便签和分类)', 'success');
 };
+
+/**
+ * 校验两个便签列表是否在内容与状态上完全一致 (用于同步合并时拦截无意义的 Store 重载与磁盘重写)
+ */
+export const areNotesEqual = (currentNotes: Note[], incomingNotes: Note[]): boolean => {
+  if (currentNotes.length !== incomingNotes.length) return false;
+  const currentMap = new Map(currentNotes.map(n => [n.id, n]));
+
+  for (const n of incomingNotes) {
+    const cur = currentMap.get(n.id);
+    if (!cur) return false;
+    if (n.updatedAt !== cur.updatedAt) return false;
+    if (n.title !== cur.title) return false;
+    if (n.content !== cur.content) return false;
+    if (n.categoryId !== cur.categoryId) return false;
+    if (n.color !== cur.color) return false;
+    if (n.type !== cur.type) return false;
+    if (Boolean(n.isPinned) !== Boolean(cur.isPinned)) return false;
+    if (Boolean(n.isDeleted) !== Boolean(cur.isDeleted)) return false;
+    if (Boolean(n.isPurged) !== Boolean(cur.isPurged)) return false;
+    if ((n.deletedAt || 0) !== (cur.deletedAt || 0)) return false;
+    if ((n.purgedAt || 0) !== (cur.purgedAt || 0)) return false;
+
+    const nTags = n.tags || [];
+    const curTags = cur.tags || [];
+    if (nTags.length !== curTags.length) return false;
+    for (let i = 0; i < nTags.length; i++) {
+      if (nTags[i] !== curTags[i]) return false;
+    }
+
+    const nImgs = n.images || [];
+    const curImgs = cur.images || [];
+    if (nImgs.length !== curImgs.length) return false;
+    for (let i = 0; i < nImgs.length; i++) {
+      if (nImgs[i] !== curImgs[i]) return false;
+    }
+  }
+  return true;
+};
+
+/**
+ * 校验两个分类列表是否在属性与层次结构上完全一致
+ */
+export const areCategoriesEqual = (currentCats: Category[], incomingCats: Category[]): boolean => {
+  if (currentCats.length !== incomingCats.length) return false;
+  const currentMap = new Map(currentCats.map(c => [c.id, c]));
+
+  for (const c of incomingCats) {
+    const cur = currentMap.get(c.id);
+    if (!cur) return false;
+    if (c.name !== cur.name) return false;
+    if (c.parentId !== cur.parentId) return false;
+    if (c.updatedAt !== cur.updatedAt) return false;
+    if (Boolean(c.isDeleted) !== Boolean(cur.isDeleted)) return false;
+    if (Boolean(c.isPurged) !== Boolean(cur.isPurged)) return false;
+  }
+  return true;
+};
+
+/**
+ * 校验分类排序数组是否完全一致
+ */
+export const areCategoryOrdersEqual = (currentOrder: string[], incomingOrder: string[]): boolean => {
+  if (currentOrder.length !== incomingOrder.length) return false;
+  for (let i = 0; i < currentOrder.length; i++) {
+    if (currentOrder[i] !== incomingOrder[i]) return false;
+  }
+  return true;
+};
+
+/**
+ * 校验偏好设置对象是否完全一致
+ */
+export const areSettingsEqual = (currentSettings: any, incomingSettings: any): boolean => {
+  if (!currentSettings && !incomingSettings) return true;
+  if (!currentSettings || !incomingSettings) return false;
+  try {
+    return JSON.stringify(currentSettings) === JSON.stringify(incomingSettings);
+  } catch {
+    return false;
+  }
+};
+

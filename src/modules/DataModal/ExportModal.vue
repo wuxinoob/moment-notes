@@ -12,12 +12,14 @@ const selectedCategoryIds = ref<string[]>([]);
 const includeSettings = ref(true);
 const includeTrash = ref(false);
 
+const activeCategories = computed(() => store.categories.filter(c => !c.isDeleted));
+
 // 计算各个分类下的便签数量映射
 const categoryNoteCountMap = computed(() => {
   const map: Record<string, number> = {};
 
   // 自定义分类计数
-  store.categories.forEach(c => {
+  activeCategories.value.forEach(c => {
     map[c.id] = 0;
   });
   map['uncategorized'] = 0;
@@ -37,7 +39,7 @@ const categoryNoteCountMap = computed(() => {
 
 // 初始化勾选状态（默认全选）
 const initSelections = () => {
-  const ids = store.categories.map(c => c.id);
+  const ids = activeCategories.value.map(c => c.id);
   if (categoryNoteCountMap.value['uncategorized'] > 0) {
     ids.push('uncategorized');
   }
@@ -56,7 +58,7 @@ watch(
 
 // 全选 / 取消全选
 const isAllSelected = computed(() => {
-  const totalCount = store.categories.length + (categoryNoteCountMap.value['uncategorized'] > 0 ? 1 : 0);
+  const totalCount = activeCategories.value.length + (categoryNoteCountMap.value['uncategorized'] > 0 ? 1 : 0);
   return totalCount > 0 && selectedCategoryIds.value.length === totalCount;
 });
 
@@ -142,12 +144,12 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeyDown));
             <!-- 分类选择列表 -->
             <DataCategorySelector
               title="分类数据"
-              :categories="store.categories"
+              :categories="activeCategories"
               :category-order="store.categoryOrder"
               :selected-category-ids="selectedCategoryIds"
               :note-count-map="categoryNoteCountMap"
               :is-all-selected="isAllSelected"
-              :total-count="store.categories.length + (categoryNoteCountMap['uncategorized'] > 0 ? 1 : 0)"
+              :total-count="activeCategories.length + (categoryNoteCountMap['uncategorized'] > 0 ? 1 : 0)"
               :show-uncategorized="categoryNoteCountMap['uncategorized'] > 0"
               :is-uncategorized-selected="selectedCategoryIds.includes('uncategorized')"
               uncategorized-label="未分类/全部便签"
