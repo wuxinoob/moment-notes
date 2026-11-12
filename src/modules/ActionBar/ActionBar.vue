@@ -30,7 +30,7 @@ const pinTooltip = computed(() => {
 
 const handleTogglePin = async () => {
   await toggleWindowPin();
-  store.showToast(isWindowPinned.value ? '已置顶固定 (失焦不隐藏)' : '已取消置顶 (点击外部自动隐藏)');
+  store.showToast(isWindowPinned.value ? '已置顶固定 (失焦不隐藏)' : '已取消置顶 (点击外部自动隐藏)', 'info');
 };
 
 const handleContainerDrag = (e: MouseEvent) => {
@@ -76,9 +76,9 @@ const handleWebdavSync = async () => {
   }
   const res = await store.syncWithWebdav();
   if (res.success) {
-    store.showToast('✅ WebDAV 同步成功！');
+    store.showToast(`✅ ${res.message || 'WebDAV 同步成功！'}`, 'success');
   } else {
-    store.showToast(`❌ ${res.message}`);
+    store.showToast(`❌ ${res.message}`, 'error');
   }
 };
 

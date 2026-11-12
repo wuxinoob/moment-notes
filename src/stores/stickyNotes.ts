@@ -10,7 +10,7 @@ import { Note, NoteType, ExportOptions, ImportOptions, BackupData } from '@type'
 import { useShortcutStore } from './shortcutStore';
 import { getDefaultCategories } from './defaultData';
 import { getCurrentSettings, applySettings } from './settingsHelper';
-import { getFilteredAndSortedNotes, normalizeCategoryOrder } from './stickyNotesAlgorithms';
+import { filterNotes, sortNotes, normalizeCategoryOrder } from './stickyNotesAlgorithms';
 import { commandRegistry } from '../domain/commands/CommandRegistry';
 import { categoryRepository, noteRepository } from '../infrastructure/storage/Repository';
 import { webdavSyncEngine } from '../infrastructure/sync/WebdavSyncEngine';
@@ -354,17 +354,28 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     noteStore.clearNotes(categoryId, descendants);
   };
 
-  // 协调便签的检索排序过滤算法
-  const filteredNotes = computed(() => {
-    return getFilteredAndSortedNotes(
+  // 协调便签的基础排序算法（搜索词变化时不重复触发耗时排序）
+  const sortedNotes = computed(() => {
+    return sortNotes(
       noteStore.notes,
-      noteStore.searchQuery,
-      noteStore.searchTarget,
       noteStore.sortMode,
       noteStore.sortOrder,
-      noteStore.currentCategoryId,
+      noteStore.currentCategoryId
+    );
+  });
+
+  // 协调便签的检索过滤算法（基于已排好序的列表进行轻量过滤）
+  const filteredNotes = computed(() => {
+    const filtered = filterNotes(
+      sortedNotes.value,
+      noteStore.appliedSearchQuery,
+      noteStore.searchTarget,
       categoryStore.categories
     );
+    if (noteStore.currentCategoryId === 'recent') {
+      return filtered.slice(0, 30);
+    }
+    return filtered;
   });
 
   // 备份与粘贴代理方法
@@ -464,6 +475,13 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     }
   };
 
+  const discardNewNote = (id: string) => {
+    noteStore.discardNewNote(id);
+    imageAssetService.cleanOrphanAssets(noteStore.allNotes).catch((e) => {
+      console.warn('Auto clean orphan assets after discardNewNote failed:', e);
+    });
+  };
+
   const prepareImportFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = e => {
@@ -542,6 +560,7 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     isLoadingNotes: toRef(noteStore, 'isLoadingNotes'),
     currentCategoryId: toRef(noteStore, 'currentCategoryId'),
     searchQuery: toRef(noteStore, 'searchQuery'),
+    appliedSearchQuery: toRef(noteStore, 'appliedSearchQuery'),
     searchTarget: toRef(noteStore, 'searchTarget'),
     sortMode: toRef(noteStore, 'sortMode'),
     sortOrder: toRef(noteStore, 'sortOrder'),
@@ -554,6 +573,9 @@ export const useStickyNotesStore = defineStore('stickyNotes', () => {
     trashNotesCount: computed(() => noteStore.trashNotesCount),
     addNote,
     deleteNote,
+    discardNewNote,
+    isNewlyCreatedNote: noteStore.isNewlyCreatedNote,
+    markNoteAsSaved: noteStore.markNoteAsSaved,
     restoreNote: noteStore.restoreNote,
     clearTrash,
     cleanOrphanImages,

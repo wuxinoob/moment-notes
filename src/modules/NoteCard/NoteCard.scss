@@ -13,7 +13,9 @@
   position: relative;
   min-height: 90px;
   max-height: var(--card-max-height, 300px);
+  box-sizing: border-box;
   cursor: default;
+  overflow-anchor: none;
   // user-select: none;
 
   @include glass-panel(var(--card-bg), var(--card-border));
@@ -47,8 +49,13 @@
       .card-actions {
         opacity: 1;
         max-width: 160px;
+        transform: none;
         pointer-events: auto;
         overflow: hidden;
+        transition:
+          opacity $transition-fast,
+          transform $transition-fast,
+          max-width 0s;
 
         &.has-active-popover {
           overflow: visible;
@@ -87,9 +94,14 @@
       .card-actions {
         opacity: 1;
         max-width: 160px;
+        transform: none;
         pointer-events: auto;
         overflow: visible;
         z-index: 21;
+        transition:
+          opacity $transition-fast,
+          transform $transition-fast,
+          max-width 0s;
       }
     }
   }
@@ -161,7 +173,7 @@
     height: 85vh;
     max-width: 90vw;
     max-height: 85vh;
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+    box-shadow: none !important;
     padding: 20px 24px 16px 24px;
     z-index: 100;
 
@@ -203,6 +215,13 @@
     :deep(.markdown-body) {
       font-size: 15px;
       line-height: 1.75;
+
+      img {
+        width: 96px;
+        height: 96px;
+        border-radius: 10px;
+        margin: 6px 8px 6px 0;
+      }
     }
 
     :deep(.card-content) {
@@ -214,6 +233,35 @@
       font-size: 15px;
       line-height: 1.75;
       padding: 10px 12px;
+    }
+
+    :deep(.note-tags-list) {
+      margin-top: 8px;
+      max-height: 54px;
+    }
+
+    :deep(.note-tag-badge) {
+      height: 24px;
+      padding: 0 9px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    :deep(.edit-tag-badge) {
+      height: 24px;
+      padding: 0 4px 0 8px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    :deep(.tag-input-wrapper) {
+      height: 24px;
+    }
+
+    :deep(.tag-input) {
+      height: 24px;
+      font-size: 12px;
+      border-radius: 6px;
     }
 
     :deep(.edit-trigger-btn) {
@@ -248,6 +296,7 @@
     :deep(.card-actions) {
       opacity: 1 !important;
       max-width: 200px !important;
+      transform: none !important;
       pointer-events: auto !important;
       overflow: hidden !important;
       gap: 6px !important;

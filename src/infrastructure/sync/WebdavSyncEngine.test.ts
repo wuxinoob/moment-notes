@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { WebdavSyncEngine, WebdavClient, defaultWebdavConfig } from './WebdavSyncEngine';
+import { WebdavSyncEngine, WebdavClient, WebdavSyncError, defaultWebdavConfig } from './WebdavSyncEngine';
 import { BackupData, Note, Category } from '@type';
 
 describe('WebDAV 云同步加固改造功能验证与模型测试', () => {
@@ -603,14 +603,21 @@ describe('WebDAV 云同步加固改造功能验证与模型测试', () => {
         status: 200
       });
 
-      // 4. PUT 上传合并后数据 (模拟坚果云/WebDAV，PUT 响应头不带 ETag)
+      // 4. PUT .tmp 写入临时文件
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Headers({})
+      });
+
+      // 5. MOVE 原子替换主文件 (模拟坚果云/AList，MOVE 响应头不带 ETag)
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 204,
         headers: new Headers({}) // 无 ETag
       });
 
-      // 5. PUT 成功后轻量 HEAD 校验并捕获服务端真实的最新 ETag 与 Last-Modified
+      // 6. 原子提交成功后轻量 HEAD 校验并捕获服务端真实的最新 ETag 与 Last-Modified
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -624,9 +631,188 @@ describe('WebDAV 云同步加固改造功能验证与模型测试', () => {
       const res = await syncEngine.performSync(() => localData, applyMergedData);
 
       expect(res.success).toBe(true);
-      // 验证配置中的 lastEtag 与 lastSyncTime 已成功从第 4 步的 HEAD 探测中校正对齐
+      expect(mockFetch.mock.calls[3][0]).toBe('https://dav.example.com/toolkit/moment_notes.json.tmp');
+      expect(mockFetch.mock.calls[3][1]?.method).toBe('PUT');
+      expect(mockFetch.mock.calls[4][1]?.method).toBe('MOVE');
+      // 验证配置中的 lastEtag 与 lastSyncTime 已成功从第 6 步的 HEAD 探测中校正对齐
       expect(syncEngine.config.value.lastEtag).toBe('server-etag-new');
       expect(syncEngine.config.value.lastSyncTime).toBeGreaterThanOrEqual(2500);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('验证远端异常诊断：0 字节空文件、HTML 代理拦截与格式损坏均抛出明确中文错误且绝不覆写云端', async () => {
+    const config = {
+      ...defaultWebdavConfig,
+      enabled: true,
+      serverUrl: 'https://dav.example.com',
+      username: 'user',
+      password: 'pwd',
+      remotePath: '/toolkit/moment_notes.json',
+      lastSyncTime: 20000,
+      lastEtag: 'empty-etag'
+    };
+
+    const client = new WebdavClient(config);
+    const originalFetch = globalThis.fetch;
+
+    try {
+      const mockFetch = vi.fn();
+      globalThis.fetch = mockFetch;
+
+      // 1. downloadJson 遇到 200 OK 但 0 字节响应
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ ETag: '"empty-etag"' }),
+        text: vi.fn().mockResolvedValue('')
+      });
+      await expect(client.downloadJson('/toolkit/moment_notes.json')).rejects.toMatchObject({
+        name: 'WebdavSyncError',
+        code: 'REMOTE_EMPTY'
+      });
+
+      // 2. downloadJson 遇到 HTML 错误页
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: vi.fn().mockResolvedValue('<html><body>502 Bad Gateway</body></html>')
+      });
+      await expect(client.downloadJson('/toolkit/moment_notes.json')).rejects.toThrow('网页/XML');
+
+      // 3. performSync 即使 HEAD ETag 吻合，但 Content-Length 为 0 时也绝不短路为"已是最新"，且不触发 PUT/MOVE
+      const syncEngine = new WebdavSyncEngine();
+      syncEngine.config.value = { ...config };
+      mockFetch.mockReset();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({
+            ETag: '"empty-etag"',
+            'Content-Length': '0',
+            'Last-Modified': new Date(19000).toUTCString()
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"empty-etag"' }),
+          text: vi.fn().mockResolvedValue('')
+        });
+
+      const localData: BackupData = {
+        version: '2.1.0',
+        timestamp: 15000,
+        categories: [createCategory('c1', '工作')],
+        notes: [createNote('n1', '本地重要便签', '不能丢', { updatedAt: 15000 })]
+      };
+      const applyMerged = vi.fn();
+      const syncRes = await syncEngine.performSync(() => localData, applyMerged);
+
+      expect(syncRes.success).toBe(false);
+      expect(syncRes.message).toContain('0 字节');
+      expect(syncEngine.syncState.value).toBe('error');
+      expect(applyMerged).not.toHaveBeenCalled();
+      // 仅发送 HEAD + GET，未发起任何 PUT/MOVE
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('验证结构校验与强制拉取保护：远端 JSON 缺字段时中止同步且不覆盖两端数据', async () => {
+    const config = {
+      ...defaultWebdavConfig,
+      enabled: true,
+      serverUrl: 'https://dav.example.com',
+      username: 'user',
+      password: 'pwd',
+      remotePath: '/toolkit/moment_notes.json',
+      lastSyncTime: 0
+    };
+
+    const syncEngine = new WebdavSyncEngine();
+    syncEngine.config.value = config;
+    const originalFetch = globalThis.fetch;
+
+    try {
+      const mockFetch = vi.fn();
+      globalThis.fetch = mockFetch;
+
+      // 合法 JSON 但缺少 categories/notes
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ ETag: '"weird"' }),
+        text: vi.fn().mockResolvedValue('{"unexpected": true}')
+      });
+
+      const localData: BackupData = {
+        version: '2.1.0',
+        timestamp: 1000,
+        categories: [createCategory('c1', '工作')],
+        notes: [createNote('n1', '测试', '正文')]
+      };
+      const applyMerged = vi.fn();
+
+      const smartRes = await syncEngine.performSync(() => localData, applyMerged);
+      expect(smartRes.success).toBe(false);
+      expect(smartRes.message).toContain('数据结构异常');
+      expect(applyMerged).not.toHaveBeenCalled();
+
+      const pullRes = await syncEngine.performSync(() => localData, applyMerged, { forcePull: true });
+      expect(pullRes.success).toBe(false);
+      expect(pullRes.message).toContain('数据结构异常');
+      expect(applyMerged).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('验证防空写入与原子降级回退：空负载被本地拦截；MOVE 返回 405 时自动清理 .tmp 并回退直接 PUT', async () => {
+    const client = new WebdavClient({
+      ...defaultWebdavConfig,
+      enabled: true,
+      serverUrl: 'https://dav.example.com',
+      username: 'user',
+      password: 'pwd',
+      remotePath: '/toolkit/moment_notes.json'
+    });
+
+    const originalFetch = globalThis.fetch;
+    const mockFetch = vi.fn();
+    globalThis.fetch = mockFetch;
+
+    try {
+      client.ensureDirectory = vi.fn().mockResolvedValue(true);
+
+      // 1. 空字符串 / null 上传应在本地即刻拦截，0 次网络请求
+      await expect(client.uploadJson('/toolkit/moment_notes.json', '')).rejects.toBeInstanceOf(WebdavSyncError);
+      await expect(client.uploadJsonAtomic('/toolkit/moment_notes.json', null)).rejects.toMatchObject({
+        code: 'EMPTY_UPLOAD_BLOCKED'
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      // 2. uploadJsonAtomic: PUT .tmp 成功 -> MOVE 返回 405 Method Not Allowed -> DELETE .tmp -> 回退 PUT 主文件 (携带 If-Match)
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, status: 201, headers: new Headers() }) // PUT .tmp
+        .mockResolvedValueOnce({ ok: false, status: 405, statusText: 'Method Not Allowed', headers: new Headers() }) // MOVE
+        .mockResolvedValueOnce({ ok: true, status: 204, headers: new Headers() }) // DELETE .tmp
+        .mockResolvedValueOnce({ ok: true, status: 204, headers: new Headers({ ETag: '"fallback-etag"' }) }); // fallback PUT
+
+      const res = await client.uploadJsonAtomic('/toolkit/moment_notes.json', { categories: [], notes: [] }, '"prev-etag"');
+      expect(res.success).toBe(true);
+      expect(res.usedFallbackPut).toBe(true);
+      expect(res.etag).toBe('fallback-etag');
+      expect(mockFetch.mock.calls[0][0]).toBe('https://dav.example.com/toolkit/moment_notes.json.tmp');
+      expect(mockFetch.mock.calls[1][1]?.method).toBe('MOVE');
+      expect(mockFetch.mock.calls[2][1]?.method).toBe('DELETE');
+      expect(mockFetch.mock.calls[3][0]).toBe('https://dav.example.com/toolkit/moment_notes.json');
+      expect((mockFetch.mock.calls[3][1]?.headers as Record<string, string>)['If-Match']).toBe('"prev-etag"');
     } finally {
       globalThis.fetch = originalFetch;
     }

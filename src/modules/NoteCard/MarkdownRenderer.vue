@@ -8,6 +8,7 @@ import { getOrLoadAssetUrl } from '@utils/useAssetImages';
 import { imageRepository } from '../../infrastructure/storage/ImageRepository';
 import { webdavSyncEngine } from '../../infrastructure/sync/WebdavSyncEngine';
 import { useStickyNotesStore } from '@stores/stickyNotes';
+import { cleanMarkdownHtml, renderMarkdownCached } from './markdownHelper';
 
 const props = defineProps<{
   content: string;
@@ -136,7 +137,7 @@ const processedContent = computed(() => {
     if (resolved) {
       return `![${alt}](${resolved})`;
     }
-    return `![${alt || '图片'}](data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40" viewBox="0 0 160 40"><rect width="160" height="40" rx="6" fill="%2388888820"/><text x="50%25" y="55%25" text-anchor="middle" dominant-baseline="middle" fill="%23888888" font-size="11" font-family="sans-serif">加载图片中...</text></svg>)`;
+    return `![${alt || '图片'}](data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="8" fill="%2388888820"/><text x="50%25" y="54%25" text-anchor="middle" dominant-baseline="middle" fill="%23888888" font-size="10" font-family="sans-serif">加载中</text></svg>)`;
   });
 
   // 1. 解析图片: ![alt](images/img_xxx.png)
@@ -147,7 +148,7 @@ const processedContent = computed(() => {
     if (resolved) {
       return `![${alt}](${resolved})`;
     }
-    return `![${alt || '图片'}](data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40" viewBox="0 0 160 40"><rect width="160" height="40" rx="6" fill="%2388888820"/><text x="50%25" y="55%25" text-anchor="middle" dominant-baseline="middle" fill="%23888888" font-size="11" font-family="sans-serif">加载图片中...</text></svg>)`;
+    return `![${alt || '图片'}](data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="8" fill="%2388888820"/><text x="50%25" y="54%25" text-anchor="middle" dominant-baseline="middle" fill="%23888888" font-size="10" font-family="sans-serif">加载中</text></svg>)`;
   });
 
   // 2. 解析音频: [audio:title](path)
@@ -224,47 +225,50 @@ const processedContent = computed(() => {
   return res;
 });
 
-// 解析并过滤 html
+// 解析并过滤 html (带 LRU 缓存与连续图片 <br> 清理)
 const renderedHtml = computed(() => {
   if (!processedContent.value) return '';
-  const rawHtml = marked.parse(processedContent.value) as string;
-  return DOMPurify.sanitize(rawHtml, {
-    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|blob|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
-    ADD_TAGS: ['audio', 'video', 'source', 'button', 'svg', 'path', 'polyline', 'line', 'circle', 'rect'],
-    ADD_ATTR: [
-      'target',
-      'class',
-      'controls',
-      'preload',
-      'playsinline',
-      'src',
-      'type',
-      'data-asset-id',
-      'data-filename',
-      'data-url',
-      'data-ext',
-      'data-action',
-      'title',
-      'viewBox',
-      'fill',
-      'stroke',
-      'stroke-width',
-      'stroke-linecap',
-      'stroke-linejoin',
-      'd',
-      'x',
-      'y',
-      'x1',
-      'y1',
-      'x2',
-      'y2',
-      'cx',
-      'cy',
-      'r',
-      'rx',
-      'ry',
-      'points'
-    ]
+  return renderMarkdownCached(processedContent.value, (raw) => {
+    const parsedHtml = marked.parse(raw) as string;
+    const cleanedHtml = cleanMarkdownHtml(parsedHtml);
+    return DOMPurify.sanitize(cleanedHtml, {
+      ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|blob|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+      ADD_TAGS: ['audio', 'video', 'source', 'button', 'svg', 'path', 'polyline', 'line', 'circle', 'rect'],
+      ADD_ATTR: [
+        'target',
+        'class',
+        'controls',
+        'preload',
+        'playsinline',
+        'src',
+        'type',
+        'data-asset-id',
+        'data-filename',
+        'data-url',
+        'data-ext',
+        'data-action',
+        'title',
+        'viewBox',
+        'fill',
+        'stroke',
+        'stroke-width',
+        'stroke-linecap',
+        'stroke-linejoin',
+        'd',
+        'x',
+        'y',
+        'x1',
+        'y1',
+        'x2',
+        'y2',
+        'cx',
+        'cy',
+        'r',
+        'rx',
+        'ry',
+        'points'
+      ]
+    });
   });
 });
 
@@ -461,12 +465,15 @@ const handleContainerClick = (e: MouseEvent) => {
   }
 
   img {
-    max-width: 100% !important;
-    height: auto !important;
+    width: 64px;
+    height: 64px;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
     box-sizing: border-box;
-    display: block;
+    display: inline-block;
+    vertical-align: middle;
     border-radius: 8px;
-    margin: 6px 0;
+    margin: 4px 6px 4px 0;
     cursor: zoom-in;
     transition: opacity 0.2s ease, filter 0.2s ease;
 

@@ -6,6 +6,30 @@
 
 ---
 
+## [2.1.0] - 2026-11-12
+
+⚡ Perf & Refactor
+- perf: 引入 `NoteSearchIndex` 预建小写检索索引，并按数据量自适应搜索防抖（> 80 条触发防抖）
+- perf: 分离便签排序与搜索过滤计算管线（`sortNotes` / `filterNotes`），避免搜索输入触发全量重复排序
+- perf: 为 Markdown 渲染增加 LRU 缓存（`renderMarkdownCached`）并优化连续图片行内流并排展示（64px 正方形缩略图）
+- perf: 优化卡片列表与图片预览性能，清理常驻 `will-change` 与大面积高斯模糊合成层瓶颈
+
+✨ Features & UX
+- feat: 新增便签编辑态全局保存/取消快捷键支持及标签下拉弹窗防冲突处理
+- feat: 新建空便签取消编辑或未保存退出时自动丢弃并清理孤立附件
+- feat: 支持标签前缀与多标签换行紧凑排版及自定义 `BasePopover` 动态方向定位
+
+🌈 UI & Style
+- style: 升级 Toast 轻拟态毛玻璃视觉与状态语义图标色彩，优化全局 Tooltip 毛玻璃质感与卡片按钮微动效
+- style: 消除 Windows/Chromium 原生焦点金橙色外边框，优化设置面板分组卡片排版与非沉浸全屏阴影
+
+🔧 Fixes & Sync Hardening
+- fix: 修复 WebDAV 同步失败时 Toast 未传入 `'error'` 类型导致仍显示绿色对勾，且错误详情一闪而逝/被截断的问题；设置页同步异常横幅新增持续显示失败原因
+- fix(sync): 拆分 [`WebdavClient.ts`](src/infrastructure/sync/WebdavClient.ts) 与重构 [`WebdavSyncEngine.ts`](src/infrastructure/sync/WebdavSyncEngine.ts)，精准诊断 0 字节空文件、HTML 代理拦截页、JSON 损坏、401/403 认证失败与网络断开等场景
+- feat(sync): 引入原子安全写入协议（`PUT .tmp` -> `MOVE` 覆盖，不支持 `MOVE` 时自动清理并回退直接 `PUT`）、Pre-PUT 负载完整性校验、空结果防清空云端拦截（Anti-Wipe Guard）、`Content-Length: 0` 禁止短路及失焦销毁/页面关闭前同步保护
+
+---
+
 ## [1.6.0] - 2026-08-25
 
 ✨ Features

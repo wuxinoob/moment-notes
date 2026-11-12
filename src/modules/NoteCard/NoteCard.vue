@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { Note } from '@type';
 import { useStickyNotesStore, COLOR_PRESETS } from '@stores/stickyNotes';
+import { useShortcutStore } from '@stores/shortcutStore';
 import NoteCardHeader from './NoteCardHeader.vue';
 import NoteCardBody from './NoteCardBody.vue';
 import NoteCardTagEditor from './NoteCardTagEditor.vue';
@@ -22,6 +23,7 @@ const props = withDefaults(
 );
 
 const store = useStickyNotesStore();
+const shortcutStore = useShortcutStore();
 
 // 是否处于编辑模式
 const isEditing = ref(false);
@@ -78,6 +80,11 @@ const enterEditMode = () => {
 
 // 保存编辑
 const saveEdit = () => {
+  if (!store.allNotes.some(n => n.id === props.note.id)) {
+    isEditing.value = false;
+    return;
+  }
+
   tagEditorRef.value?.addTag();
 
   const titleChanged = editTitle.value.trim() !== (props.note.title || '').trim();
@@ -93,11 +100,11 @@ const saveEdit = () => {
       content: editContent.value,
       tags: [...editTags.value]
     });
-    isEditing.value = false;
   } else {
-    cancelEdit();
-    return;
+    store.markNoteAsSaved?.(props.note.id);
   }
+
+  isEditing.value = false;
 
   if (store.editingNoteId === props.note.id) {
     store.editingNoteId = null;
@@ -110,6 +117,7 @@ const saveEdit = () => {
 
 // 取消编辑
 const cancelEdit = () => {
+  const isNew = store.isNewlyCreatedNote?.(props.note.id);
   isEditing.value = false;
   editTitle.value = props.note.title || '';
   editContent.value = props.note.content;
@@ -121,6 +129,10 @@ const cancelEdit = () => {
 
   if (store.openedFullscreenForEditNoteId === props.note.id) {
     store.closeNotePreview();
+  }
+
+  if (isNew) {
+    store.discardNewNote?.(props.note.id);
   }
 };
 
@@ -436,15 +448,39 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 };
 
+const handleEditingKeydown = (e: KeyboardEvent) => {
+  if (!isEditing.value || shortcutStore.isRecording) return;
+
+  const keyString = shortcutStore.getEventKeyString(e);
+  if (!keyString) return;
+
+  const matched = shortcutStore.shortcuts.find(s => s.currentKey === keyString);
+  if (!matched) return;
+
+  if (matched.id === 'saveEdit') {
+    e.preventDefault();
+    e.stopPropagation();
+    saveEdit();
+  } else if (matched.id === 'cancelEdit') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!tagEditorRef.value?.closeDropdownIfOpen()) {
+      cancelEdit();
+    }
+  }
+};
+
 watch(isEditing, editing => {
   if (editing) {
     nextTick(() => {
       document.addEventListener('mousedown', handleMousedown, true);
       document.addEventListener('click', handleClickOutside, true);
+      document.addEventListener('keydown', handleEditingKeydown);
     });
   } else {
     document.removeEventListener('mousedown', handleMousedown, true);
     document.removeEventListener('click', handleClickOutside, true);
+    document.removeEventListener('keydown', handleEditingKeydown);
     mousedownTarget = null;
   }
 });
@@ -463,6 +499,7 @@ onBeforeUnmount(() => {
   }
   document.removeEventListener('mousedown', handleMousedown, true);
   document.removeEventListener('click', handleClickOutside, true);
+  document.removeEventListener('keydown', handleEditingKeydown);
   document.removeEventListener('selectionchange', handleSelectionChange);
 });
 
@@ -533,7 +570,13 @@ onMounted(() => {
       @switch-to-markdown="handleSwitchToMarkdown"
     />
 
-    <NoteCardTagEditor v-if="isEditing" ref="tagEditorRef" v-model:tags="editTags" />
+    <NoteCardTagEditor
+      v-if="isEditing"
+      ref="tagEditorRef"
+      v-model:tags="editTags"
+      @save-edit="saveEdit"
+      @cancel-edit="cancelEdit"
+    />
 
     <NoteCardFooter
       ref="footerRef"

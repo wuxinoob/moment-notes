@@ -60,6 +60,16 @@ onMounted(async () => {
   }
 
   let blurTimer: number | null = null;
+  let pendingHideRetryTimer: number | null = null;
+
+  const isMemoryDestroyEnabled = () => {
+    try {
+      return localStorage.getItem('moment_notes_memory_destroy_on_hide') === 'true';
+    } catch {
+      return false;
+    }
+  };
+
   const handleWindowBlur = () => {
     if (!isIndependentWindow()) return;
     // 若处于置顶固定状态，失焦不自动隐藏
@@ -76,6 +86,15 @@ onMounted(async () => {
         !isWindowPinned.value &&
         !(window as any).__isFileDialogActive
       ) {
+        // 省内存销毁模式下，若正在进行 WebDAV 同步，延后隐藏/销毁以避免截断上传请求
+        if (webdavSyncEngine.isSyncing.value && isMemoryDestroyEnabled()) {
+          if (pendingHideRetryTimer) clearTimeout(pendingHideRetryTimer);
+          pendingHideRetryTimer = window.setTimeout(() => {
+            pendingHideRetryTimer = null;
+            handleWindowBlur();
+          }, 400);
+          return;
+        }
         await hideCurrentWindow();
       }
     }, 120);
@@ -86,8 +105,19 @@ onMounted(async () => {
       clearTimeout(blurTimer);
       blurTimer = null;
     }
+    if (pendingHideRetryTimer) {
+      clearTimeout(pendingHideRetryTimer);
+      pendingHideRetryTimer = null;
+    }
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
       webdavSyncEngine.triggerSyncCheck({ silent: true, minIntervalMs: 15000 }).catch(() => {});
+    }
+  };
+
+  const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    if (webdavSyncEngine.isSyncing.value) {
+      e.preventDefault();
+      e.returnValue = '';
     }
   };
 
@@ -95,6 +125,10 @@ onMounted(async () => {
     if (e.key === 'Escape' && isIndependentWindow()) {
       const hasModal = document.querySelector('.modal-backdrop, .preview-modal-overlay, .image-preview-overlay');
       if (!hasModal && !store.editingNoteId) {
+        if (webdavSyncEngine.isSyncing.value && isMemoryDestroyEnabled()) {
+          store.showToast('正在向云端写入数据，请稍候片刻...', 'info');
+          return;
+        }
         hideCurrentWindow();
       }
     }
@@ -104,13 +138,16 @@ onMounted(async () => {
   window.addEventListener('focus', handleWindowFocus);
   window.addEventListener('blur', handleWindowBlur);
   window.addEventListener('keydown', handleGlobalKeyDown);
+  window.addEventListener('beforeunload', handleBeforeUnload);
 
   unsubscribeCallbacks.push(() => {
     if (blurTimer) clearTimeout(blurTimer);
+    if (pendingHideRetryTimer) clearTimeout(pendingHideRetryTimer);
     document.removeEventListener('visibilitychange', handleWindowFocus);
     window.removeEventListener('focus', handleWindowFocus);
     window.removeEventListener('blur', handleWindowBlur);
     window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
   });
 
   // 5. 监听独立便签窗口与跨窗口同步事件

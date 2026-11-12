@@ -10,7 +10,7 @@ import { initStorage } from './utils/storage';
 export const manifest = {
   id: 'custom.moment-notes',
   name: '拾光便签',
-  version: '2.0.0',
+  version: '2.1.0',
   api: 3,
   description: '高颜值 WebDAV 便签，支持独立置顶悬浮窗与跨窗口双向同步',
   contributes: {

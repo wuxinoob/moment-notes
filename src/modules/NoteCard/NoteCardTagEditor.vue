@@ -1,14 +1,26 @@
 <script lang="ts" setup>
 import { ref, computed } from 'vue';
+import { X, ChevronDown, Check } from '@lucide/vue';
 import { useStickyNotesStore } from '@stores/stickyNotes';
+import { useShortcutStore } from '@stores/shortcutStore';
+import { reorderTagList } from '@stores/stickyNotesAlgorithms';
+import { hideTooltip } from '@utils/tooltip';
 
 const tags = defineModel<string[]>('tags', { default: () => [] });
+
+const emit = defineEmits<{
+  (e: 'save-edit'): void;
+  (e: 'cancel-edit'): void;
+}>();
 
 const newTagInput = ref('');
 const showDropdown = ref(false);
 const inputRef = ref<HTMLInputElement | null>(null);
+const editorRef = ref<HTMLElement | null>(null);
+const draggedTag = ref<string | null>(null);
 
 const store = useStickyNotesStore();
+const shortcutStore = useShortcutStore();
 
 // 获取所有已存在的标签
 const allExistingTags = computed(() => {
@@ -26,25 +38,17 @@ const allExistingTags = computed(() => {
 });
 
 const addTag = () => {
-  let tag = newTagInput.value.replace(/，/g, ',').trim();
-  if (tag.endsWith(',')) {
-    tag = tag.slice(0, -1).trim();
-  }
+  const tag = newTagInput.value.trim();
   if (tag) {
-    const tagsToAdd = tag
-      .split(',')
-      .map(t => t.trim())
-      .filter(Boolean);
-    tagsToAdd.forEach(t => {
-      if (!tags.value.includes(t)) {
-        tags.value.push(t);
-      }
-    });
+    if (!tags.value.includes(tag)) {
+      tags.value.push(tag);
+    }
   }
   newTagInput.value = '';
 };
 
 const removeTag = (index: number) => {
+  hideTooltip();
   tags.value.splice(index, 1);
 };
 
@@ -70,244 +74,232 @@ const selectTag = (tag: string) => {
 };
 
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === ',' || e.key === '，') {
+  const keyString = shortcutStore.getEventKeyString(e);
+  if (keyString) {
+    const matched = shortcutStore.shortcuts.find(s => s.currentKey === keyString);
+    if (matched) {
+      if (matched.id === 'saveEdit') {
+        e.preventDefault();
+        e.stopPropagation();
+        emit('save-edit');
+        return;
+      } else if (matched.id === 'cancelEdit') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (showDropdown.value) {
+          showDropdown.value = false;
+        } else {
+          emit('cancel-edit');
+        }
+        return;
+      }
+    }
+  }
+
+  // 输入框无内容时按退格或删除键，静默删除上一个标签
+  if (
+    !e.isComposing &&
+    (e.key === 'Backspace' || e.key === 'Delete') &&
+    !newTagInput.value &&
+    tags.value.length > 0
+  ) {
+    e.preventDefault();
+    removeTag(tags.value.length - 1);
+    return;
+  }
+
+  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
     addTag();
+  } else if (e.key === 'Escape' && showDropdown.value) {
+    e.preventDefault();
+    e.stopPropagation();
+    showDropdown.value = false;
   }
 };
 
-// 暴露 addTag 方法供父组件在保存时调用，以便在点击保存前将未按回车的文本也作为标签录入
+// 标签拖拽排序事件
+const handleTagDragStart = (e: DragEvent, tag: string) => {
+  const target = e.target as HTMLElement | null;
+  if (target?.closest('.delete-tag-btn')) {
+    e.preventDefault();
+    return;
+  }
+  draggedTag.value = tag;
+  showDropdown.value = false;
+  hideTooltip();
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', tag);
+  }
+};
+
+const handleTagDragOver = (e: DragEvent, targetTag: string) => {
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move';
+  }
+  const currentDragged = draggedTag.value;
+  if (!currentDragged || currentDragged === targetTag) return;
+  if (e.clientX === 0 && e.clientY === 0) return;
+
+  const dragIndex = tags.value.indexOf(currentDragged);
+  const hoverIndex = tags.value.indexOf(targetTag);
+  if (dragIndex === -1 || hoverIndex === -1 || dragIndex === hoverIndex) return;
+
+  const container = editorRef.value;
+  const targetEl = e.currentTarget as HTMLElement | null;
+  if (!container || !targetEl) return;
+
+  const containerRect = container.getBoundingClientRect();
+  const draggedEl = container.querySelector('.edit-tag-badge.is-dragging') as HTMLElement | null;
+
+  // 基于 offsetLeft / offsetTop 获取不受 FLIP transform 影响的布局坐标，防止过渡动画期间发生反复换位抖动
+  const targetLeft = containerRect.left + targetEl.offsetLeft;
+  const targetTop = containerRect.top + targetEl.offsetTop;
+  const targetWidth = targetEl.offsetWidth;
+  const targetHeight = targetEl.offsetHeight;
+
+  const draggedTop = draggedEl ? containerRect.top + draggedEl.offsetTop : targetTop;
+  const draggedHeight = draggedEl ? draggedEl.offsetHeight : targetHeight;
+
+  const isSameRow = Math.abs(draggedTop - targetTop) < Math.min(draggedHeight, targetHeight) / 2;
+
+  let shouldMove = false;
+  if (isSameRow) {
+    const midX = targetLeft + targetWidth / 2;
+    shouldMove = dragIndex < hoverIndex ? e.clientX > midX : e.clientX < midX;
+  } else {
+    const midY = targetTop + targetHeight / 2;
+    shouldMove = dragIndex < hoverIndex ? e.clientY > midY : e.clientY < midY;
+  }
+
+  if (shouldMove) {
+    tags.value = reorderTagList(tags.value, currentDragged, targetTag);
+  }
+};
+
+const handleInputDragOver = (e: DragEvent) => {
+  const currentDragged = draggedTag.value;
+  if (!currentDragged) return;
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move';
+  }
+  const lastTag = tags.value[tags.value.length - 1];
+  if (lastTag && lastTag !== currentDragged) {
+    tags.value = reorderTagList(tags.value, currentDragged, lastTag);
+  }
+};
+
+const handleContainerDragOver = (e: DragEvent) => {
+  if (!draggedTag.value) return;
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move';
+  }
+};
+
+const handleTagDragEnd = () => {
+  draggedTag.value = null;
+};
+
+const closeDropdownIfOpen = (): boolean => {
+  if (showDropdown.value) {
+    showDropdown.value = false;
+    return true;
+  }
+  return false;
+};
+
+// 暴露方法供父组件在保存或响应快捷键时调用
 defineExpose({
-  addTag
+  addTag,
+  closeDropdownIfOpen
 });
 </script>
 
 <template>
-  <div class="tags-editor" @click.stop>
-    <div v-for="(tag, idx) in tags" :key="idx" class="edit-tag-badge">
-      <span>{{ tag }}</span>
-      <button class="delete-tag-btn" data-tooltip="删除标签" @click.stop="removeTag(idx)">
-        ×
-      </button>
-    </div>
-    <div class="tag-input-wrapper">
+  <div
+    ref="editorRef"
+    class="tags-editor"
+    :class="{ 'is-sorting': draggedTag !== null }"
+    @click.stop
+    @dragover.stop.prevent="handleContainerDragOver"
+    @drop.stop.prevent="handleTagDragEnd"
+  >
+    <TransitionGroup name="tag-list">
+      <div
+        v-for="(tag, idx) in tags"
+        :key="tag"
+        class="edit-tag-badge"
+        :class="{ 'is-dragging': draggedTag === tag }"
+        draggable="true"
+        data-tooltip="拖动调整顺序"
+        @dragstart.stop="handleTagDragStart($event, tag)"
+        @dragover.stop.prevent="handleTagDragOver($event, tag)"
+        @dragend.stop="handleTagDragEnd"
+        @drop.stop.prevent="handleTagDragEnd"
+      >
+        <span class="tag-label">{{ tag }}</span>
+        <button
+          type="button"
+          class="delete-tag-btn"
+          draggable="false"
+          aria-label="删除标签"
+          data-tooltip="删除标签"
+          @mousedown.stop
+          @click.stop="removeTag(idx)"
+        >
+          <X class="delete-tag-icon" />
+        </button>
+      </div>
+    </TransitionGroup>
+
+    <div
+      class="tag-input-wrapper"
+      @dragover.stop.prevent="handleInputDragOver"
+      @drop.stop.prevent="handleTagDragEnd"
+    >
       <input
         ref="inputRef"
         v-model="newTagInput"
         type="text"
-        placeholder="+ 添加标签 (按回车或逗号)"
+        placeholder="＋添加标签"
         class="tag-input"
-        @keydown.enter.prevent="addTag"
         @keydown="handleKeydown"
         @blur="handleBlur"
       />
       <button
         class="arrow-btn"
         type="button"
+        :class="{ active: showDropdown }"
         data-tooltip="选择已有标签"
         @mousedown.prevent
         @click="toggleDropdown"
       >
-        <svg
-          class="arrow-icon"
-          :class="{ open: showDropdown }"
-          viewBox="0 0 24 24"
-          width="12"
-          height="12"
-        >
-          <path fill="currentColor" d="M7 10l5 5 5-5z" />
-        </svg>
+        <ChevronDown class="arrow-icon" :class="{ open: showDropdown }" />
       </button>
 
-      <div v-if="showDropdown" class="tags-dropdown" @mousedown.prevent>
-        <div v-if="allExistingTags.length === 0" class="dropdown-item empty">
-          暂无已有标签
+      <Transition name="tag-dropdown-fade">
+        <div v-if="showDropdown" class="tags-dropdown" @mousedown.prevent>
+          <div v-if="allExistingTags.length === 0" class="dropdown-item empty">
+            暂无已有标签
+          </div>
+          <div
+            v-for="tag in allExistingTags"
+            v-else
+            :key="tag"
+            class="dropdown-item"
+            :class="{ selected: tags.includes(tag) }"
+            :data-tooltip="tag"
+            data-tooltip-only-overflow
+            @click="selectTag(tag)"
+          >
+            <span class="tag-text">{{ tag }}</span>
+            <Check v-if="tags.includes(tag)" class="check-icon" />
+          </div>
         </div>
-        <div
-          v-for="tag in allExistingTags"
-          v-else
-          :key="tag"
-          class="dropdown-item"
-          :class="{ selected: tags.includes(tag) }"
-          :data-tooltip="tag"
-          @click="selectTag(tag)"
-        >
-          <span class="tag-text">{{ tag }}</span>
-          <span v-if="tags.includes(tag)" class="check-icon">✓</span>
-        </div>
-      </div>
+      </Transition>
     </div>
   </div>
 </template>
 
-<style lang="scss" scoped>
-.tags-editor {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--popover-border);
-  margin-bottom: 6px;
-}
-
-.edit-tag-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--badge-bg);
-  border: 1px solid var(--popover-border);
-  color: inherit;
-
-  .delete-tag-btn {
-    border: none;
-    background: transparent;
-    color: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 2px;
-    opacity: 0.6;
-    transition: opacity 0.2s;
-
-    &:hover {
-      opacity: 1;
-    }
-  }
-}
-
-.tag-input-wrapper {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  flex: 1;
-  min-width: 100px;
-}
-
-.tag-input {
-  border: none;
-  background: var(--badge-bg);
-  border: 1px dashed var(--popover-border);
-  border-radius: 6px;
-  padding: 3px 22px 3px 8px;
-  font-size: 11px;
-  color: inherit;
-  width: 100%;
-
-  &:focus {
-    border-style: solid;
-    border-color: var(--card-border);
-    outline: none;
-
-    .dark-theme & {
-      border-color: var(--card-border-dark);
-    }
-  }
-
-  &::placeholder {
-    color: inherit;
-    opacity: 0.5;
-  }
-}
-
-.arrow-btn {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  border: none;
-  background: transparent;
-  color: inherit;
-  opacity: 0.6;
-  padding: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition:
-    opacity 0.2s,
-    transform 0.2s;
-
-  &:hover {
-    opacity: 1;
-  }
-
-  .arrow-icon {
-    transition: transform 0.2s ease;
-    &.open {
-      transform: rotate(180deg);
-    }
-  }
-}
-
-.tags-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  width: 100%;
-  min-width: 120px;
-  max-width: 200px;
-  max-height: 150px;
-  overflow-y: auto;
-  background: var(--popover-bg);
-  border: 1px solid var(--popover-border);
-  border-radius: 6px;
-  box-shadow: var(--popover-shadow);
-  z-index: $z-index-popover;
-  padding: 4px 0;
-
-  .dropdown-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 10px;
-    font-size: 11px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition:
-      background-color 0.2s ease,
-      color 0.2s ease,
-      transform 0.2s ease;
-
-    &:hover {
-      background: var(--item-hover-bg);
-      color: var(--text-primary);
-    }
-
-    &.selected {
-      color: var(--accent-color);
-      background: var(--accent-light);
-      font-weight: 500;
-    }
-
-    .tag-text {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      flex: 1;
-      margin-right: 8px;
-    }
-
-    .check-icon {
-      font-size: 10px;
-      flex-shrink: 0;
-    }
-
-    &.empty {
-      color: var(--text-muted);
-      cursor: default;
-      justify-content: center;
-      padding: 8px 10px;
-      &:hover {
-        background: transparent;
-      }
-    }
-  }
-}
-</style>
+<style lang="scss" scoped src="./NoteCardTagEditor.scss"></style>

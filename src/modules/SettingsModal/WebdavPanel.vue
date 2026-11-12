@@ -46,13 +46,13 @@ const handleTestConnection = async () => {
     const res = await client.testConnection();
     testResult.value = res;
     if (res.success) {
-      uiStore.showToast('✅ WebDAV 连接测试成功！');
+      uiStore.showToast('✅ WebDAV 连接测试成功！', 'success');
     } else {
-      uiStore.showToast(`❌ ${res.message}`);
+      uiStore.showToast(`❌ ${res.message}`, 'error');
     }
   } catch (err: any) {
     testResult.value = { success: false, message: err.message || '网络连接异常' };
-    uiStore.showToast(`❌ 连接失败: ${err.message}`);
+    uiStore.showToast(`❌ 连接失败: ${err.message}`, 'error');
   } finally {
     isTesting.value = false;
   }
@@ -61,11 +61,11 @@ const handleTestConnection = async () => {
 const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'smart') => {
   handleSave();
   if (mode === 'forcePush') {
-    uiStore.showToast('正在全量上传覆盖远端...');
+    uiStore.showToast('正在全量上传覆盖远端...', 'info');
   } else if (mode === 'forcePull') {
-    uiStore.showToast('正在从远端拉取覆盖本地...');
+    uiStore.showToast('正在从远端拉取覆盖本地...', 'info');
   } else {
-    uiStore.showToast('正在进行智能双向墓碑合并同步...');
+    uiStore.showToast('正在进行智能双向墓碑合并同步...', 'info');
   }
 
   const res = await stickyStore.syncWithWebdav({
@@ -73,9 +73,9 @@ const handleManualSync = async (mode: 'smart' | 'forcePush' | 'forcePull' = 'sma
     forcePull: mode === 'forcePull'
   });
   if (res.success) {
-    uiStore.showToast(`✅ ${res.message}`);
+    uiStore.showToast(`✅ ${res.message}`, 'success');
   } else {
-    uiStore.showToast(`❌ ${res.message}`);
+    uiStore.showToast(`❌ ${res.message}`, 'error');
   }
 };
 
@@ -83,7 +83,7 @@ const isCleaningGC = ref(false);
 const handleCleanImageGC = async () => {
   if (isCleaningGC.value) return;
   isCleaningGC.value = true;
-  uiStore.showToast('正在执行孤儿图片扫描与垃圾回收...');
+  uiStore.showToast('正在执行孤儿图片扫描与垃圾回收...', 'info');
   try {
     const client = new WebdavClient(config.value);
     const res = await imageLifecycleService.performImageGC(
@@ -128,6 +128,9 @@ const handleCleanImageGC = async () => {
           </div>
           <div class="status-sub">
             上次同步：{{ formattedLastSync }}
+          </div>
+          <div v-if="syncState === 'error' && config.lastSyncMessage" class="status-error-detail">
+            {{ config.lastSyncMessage }}
           </div>
         </div>
       </div>
@@ -381,6 +384,13 @@ const handleCleanImageGC = async () => {
     gap: 2px;
     .status-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
     .status-sub { font-size: 12px; color: var(--text-secondary); }
+    .status-error-detail {
+      font-size: 12px;
+      color: #ef4444;
+      line-height: 1.45;
+      margin-top: 2px;
+      word-break: break-word;
+    }
   }
 
   .sync-now-btn {

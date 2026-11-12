@@ -41,9 +41,10 @@ export const useUiStore = defineStore('uiStore', () => {
     toastType.value = type;
     toastPosition.value = position;
     if (toastTimer) clearTimeout(toastTimer);
+    const duration = type === 'error' ? 5000 : type === 'warning' ? 3500 : 2500;
     toastTimer = setTimeout(() => {
       toastMessage.value = '';
-    }, 2500);
+    }, duration);
   };
 
   // 监听领域事件，解耦业务发出 Toast 请求

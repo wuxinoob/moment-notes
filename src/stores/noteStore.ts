@@ -6,6 +6,10 @@ import { useUiStore } from './uiStore';
 import { useCategoryStore } from './categoryStore';
 import { COLOR_PRESETS } from './colorPresets';
 import { SearchTarget } from './stickyNotesAlgorithms';
+import {
+  SEARCH_DEBOUNCE_THRESHOLD,
+  SEARCH_DEBOUNCE_MS
+} from '../domain/search/NoteSearchIndex';
 import { noteRepository } from '../infrastructure/storage/Repository';
 import { eventBus } from '../domain/events/DomainEventBus';
 import { imageLifecycleService } from '../infrastructure/sync/ImageLifecycleService';
@@ -16,12 +20,34 @@ export const useNoteStore = defineStore('noteStore', () => {
   const notes = ref<Note[]>([]);
   const currentCategoryId = ref<string>('all');
   const searchQuery = ref<string>('');
+  const appliedSearchQuery = ref<string>('');
   const searchTarget = ref<SearchTarget[]>(['all']);
   const sortMode = ref<'date' | 'title' | 'tag' | 'custom' | 'useCount'>('date');
   const sortOrder = ref<'asc' | 'desc'>('desc');
   const draggedNoteId = ref<string | null>(null);
   const editingNoteId = ref<string | null>(null);
   const isLoadingNotes = ref(false);
+
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // 监听原始搜索输入，按数据量自适应防抖或立即生效
+  watch(searchQuery, (newQuery) => {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+
+    const trimmed = newQuery.trim();
+    if (!trimmed || notes.value.length <= SEARCH_DEBOUNCE_THRESHOLD) {
+      appliedSearchQuery.value = newQuery;
+      return;
+    }
+
+    searchDebounceTimer = setTimeout(() => {
+      appliedSearchQuery.value = newQuery;
+      searchDebounceTimer = null;
+    }, SEARCH_DEBOUNCE_MS);
+  });
 
   const syncCurrentCategoryNotes = () => {
     const categoryId = currentCategoryId.value;
@@ -70,6 +96,11 @@ export const useNoteStore = defineStore('noteStore', () => {
 
   watch(currentCategoryId, (newId) => {
     if (newId) {
+      if (searchDebounceTimer) {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = null;
+        appliedSearchQuery.value = searchQuery.value;
+      }
       storage.setItem('sticky_notes_last_category_id', newId);
       applyCategoryViewSettings(newId);
       loadNotesForCurrentCategory();
@@ -99,6 +130,27 @@ export const useNoteStore = defineStore('noteStore', () => {
   };
 
   let lastRandomColor = '';
+  const newlyCreatedNoteIds = ref<Set<string>>(new Set());
+
+  const isNewlyCreatedNote = (id: string) => newlyCreatedNoteIds.value.has(id);
+
+  const markNoteAsSaved = (id: string) => {
+    newlyCreatedNoteIds.value.delete(id);
+  };
+
+  const discardNewNote = (id: string) => {
+    newlyCreatedNoteIds.value.delete(id);
+    if (editingNoteId.value === id) {
+      editingNoteId.value = null;
+    }
+    const index = allNotes.value.findIndex(n => n.id === id);
+    if (index !== -1) {
+      allNotes.value.splice(index, 1);
+      saveNotes();
+      syncCurrentCategoryNotes();
+      eventBus.emit('NOTE_DELETED', id);
+    }
+  };
 
   const addNote = (categoryId: string, content = '', title = '', color?: string, type?: NoteType) => {
     const uiStore = useUiStore();
@@ -126,6 +178,7 @@ export const useNoteStore = defineStore('noteStore', () => {
     };
 
     allNotes.value.unshift(newNote);
+    newlyCreatedNoteIds.value.add(newNote.id);
     saveNotes();
     syncCurrentCategoryNotes();
 
@@ -135,6 +188,7 @@ export const useNoteStore = defineStore('noteStore', () => {
   };
 
   const deleteNote = (id: string) => {
+    newlyCreatedNoteIds.value.delete(id);
     const note = allNotes.value.find(n => n.id === id);
     if (!note) return;
 
@@ -203,6 +257,7 @@ export const useNoteStore = defineStore('noteStore', () => {
     fields: Partial<Omit<Note, 'id' | 'createdAt'>>,
     updateTimestamp = true
   ) => {
+    newlyCreatedNoteIds.value.delete(id);
     const note = allNotes.value.find(n => n.id === id);
     if (note) {
       Object.assign(note, fields);
@@ -342,6 +397,7 @@ export const useNoteStore = defineStore('noteStore', () => {
     notes,
     currentCategoryId,
     searchQuery,
+    appliedSearchQuery,
     searchTarget,
     sortMode,
     sortOrder,
@@ -351,6 +407,10 @@ export const useNoteStore = defineStore('noteStore', () => {
     saveNotes,
     addNote,
     deleteNote,
+    discardNewNote,
+    isNewlyCreatedNote,
+    markNoteAsSaved,
+    newlyCreatedNoteIds,
     restoreNote,
     clearTrash,
     trashNotesCount,

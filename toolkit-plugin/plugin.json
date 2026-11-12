@@ -1,7 +1,7 @@
 {
   "id": "custom.moment-notes",
   "name": "拾光便签",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "api": 3,
   "entry": "main.js",
   "description": "基于 WebDAV 同步的高颜值便签插件，支持独立置顶悬浮窗与跨窗口双向同步",

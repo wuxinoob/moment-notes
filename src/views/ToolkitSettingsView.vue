@@ -326,9 +326,16 @@ onMounted(() => {
         <div
           v-if="testMessage"
           :class="['tb-badge', testSuccess === true ? 'tb-badge-ok' : testSuccess === false ? 'tb-badge-bad' : 'tb-badge-warn']"
-          style="padding: 6px 12px; margin-top: 4px; font-size: 13px;"
+          style="padding: 8px 12px; margin-top: 4px; font-size: 13px; white-space: normal; line-height: 1.5;"
         >
           {{ testMessage }}
+        </div>
+        <div
+          v-else-if="syncState === 'error' && config.lastSyncMessage"
+          class="tb-badge tb-badge-bad"
+          style="padding: 8px 12px; margin-top: 4px; font-size: 13px; white-space: normal; line-height: 1.5;"
+        >
+          {{ config.lastSyncMessage }}
         </div>
       </div>
     </div>

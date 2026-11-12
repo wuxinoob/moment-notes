@@ -3,6 +3,10 @@ import { WebdavConfig, WebdavSyncState, BackupData, Note, Category } from '@type
 import { storage } from '@utils/storage';
 import { BackupCodec, draftBufferRepository } from '../storage/Repository';
 import { imageRepository } from '../storage/ImageRepository';
+import { WebdavClient, WebdavSyncError } from './WebdavClient';
+
+export { WebdavClient, WebdavSyncError };
+export type { WebdavSyncErrorCode } from './WebdavClient';
 
 export const WEBDAV_CONFIG_STORAGE_KEY = 'sticky_notes_webdav_config';
 
@@ -22,348 +26,6 @@ export const defaultWebdavConfig: WebdavConfig = {
   autoCompressImages: true,
   maxImageSizeMB: 10
 };
-
-/**
- * 原生 WebDAV HTTP 协议客户端
- * 支持标准 WebDAV 服务器 (坚果云 / Nextcloud / OwnCloud / Synology / AList / InfiniCLOUD)
- */
-export class WebdavClient {
-  private config: WebdavConfig;
-
-  constructor(config: WebdavConfig) {
-    this.config = config;
-  }
-
-  private getAuthHeader(): string {
-    const user = this.config.username || '';
-    const pass = this.config.password || '';
-    try {
-      // 兼容中文与特殊字符的 Base64 编码
-      const token = btoa(unescape(encodeURIComponent(`${user}:${pass}`)));
-      return `Basic ${token}`;
-    } catch {
-      return `Basic ${btoa(`${user}:${pass}`)}`;
-    }
-  }
-
-  private getFullUrl(path: string): string {
-    let base = (this.config.serverUrl || '').trim();
-    if (!base.startsWith('http://') && !base.startsWith('https://')) {
-      base = `https://${base}`;
-    }
-    base = base.replace(/\/+$/, '');
-    const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${cleanPath}`;
-  }
-
-  /**
-   * 测试连接有效性
-   */
-  public async testConnection(): Promise<{ success: boolean; message: string }> {
-    if (!this.config.serverUrl) {
-      return { success: false, message: '请输入 WebDAV 服务器地址' };
-    }
-    const targetUrl = this.getFullUrl('/');
-    try {
-      const res = await fetch(targetUrl, {
-        method: 'PROPFIND',
-        headers: {
-          Authorization: this.getAuthHeader(),
-          Depth: '0'
-        }
-      }).catch(async () => {
-        // 部分服务不支持 PROPFIND 根路径，降级为 OPTIONS / GET
-        return await fetch(targetUrl, {
-          method: 'OPTIONS',
-          headers: {
-            Authorization: this.getAuthHeader()
-          }
-        });
-      });
-
-      if (res.status === 401 || res.status === 403) {
-        return { success: false, message: '认证失败：用户名或应用密码错误 (HTTP ' + res.status + ')' };
-      }
-      if (res.status >= 200 && res.status < 400) {
-        return { success: true, message: 'WebDAV 服务器连接成功！' };
-      }
-      return { success: false, message: `服务器响应异常 (HTTP ${res.status}: ${res.statusText})` };
-    } catch (err: any) {
-      return { success: false, message: `网络连接失败: ${err.message || '请检查服务器地址与网络'}` };
-    }
-  }
-
-  /**
-   * 确保远端文件夹存在 (自动递归创建目录)
-   */
-  public async ensureDirectory(dirPath: string): Promise<boolean> {
-    const segments = dirPath.split('/').filter(Boolean);
-    let currentPath = '';
-
-    for (const segment of segments) {
-      currentPath += `/${segment}`;
-      const url = this.getFullUrl(currentPath);
-      try {
-        const checkRes = await fetch(url, {
-          method: 'PROPFIND',
-          headers: {
-            Authorization: this.getAuthHeader(),
-            Depth: '0'
-          }
-        });
-
-        if (checkRes.status === 404) {
-          await fetch(url, {
-            method: 'MKCOL',
-            headers: {
-              Authorization: this.getAuthHeader()
-            }
-          });
-        }
-      } catch {
-        // 忽略中间错误，尝试继续后续操作
-      }
-    }
-    return true;
-  }
-
-  /**
-   * 获取远端文件元数据 (通过轻量 HTTP HEAD 获取 Last-Modified 与 ETag，无需下载具体文件体，节省 99.9% 流量)
-   */
-  public async getFileMeta(remotePath: string): Promise<{
-    exists: boolean;
-    lastModified?: number;
-    etag?: string;
-    contentLength?: number;
-  }> {
-    const url = this.getFullUrl(remotePath);
-    try {
-      const res = await fetch(url, {
-        method: 'HEAD',
-        headers: {
-          Authorization: this.getAuthHeader(),
-          'Cache-Control': 'no-cache'
-        }
-      });
-
-      if (res.status === 404) {
-        return { exists: false };
-      }
-
-      if (!res.ok) {
-        return { exists: false };
-      }
-
-      const rawEtag = res.headers.get('ETag') || undefined;
-      const cleanEtag = rawEtag?.replace(/^W\//, '').replace(/"/g, '').trim();
-
-      const lastModifiedHeader = res.headers.get('Last-Modified');
-      const lastModified = lastModifiedHeader ? new Date(lastModifiedHeader).getTime() : undefined;
-      const contentLength = res.headers.get('Content-Length') ? Number(res.headers.get('Content-Length')) : undefined;
-
-      return {
-        exists: true,
-        etag: cleanEtag || rawEtag,
-        lastModified,
-        contentLength
-      };
-    } catch {
-      return { exists: false };
-    }
-  }
-
-  /**
-   * 下载远端 JSON 文件 (附带 ETag 标记)
-   */
-  public async downloadJson<T = any>(remotePath: string): Promise<{ exists: boolean; data: T | null; etag?: string }> {
-    const url = this.getFullUrl(remotePath);
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Authorization: this.getAuthHeader(),
-          'Cache-Control': 'no-cache'
-        }
-      });
-
-      if (res.status === 404) {
-        return { exists: false, data: null };
-      }
-
-      if (!res.ok) {
-        throw new Error(`下载失败 HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      const etag = res.headers.get('ETag') || undefined;
-      const text = await res.text();
-      const parsed = JSON.parse(text);
-      return { exists: true, data: parsed, etag };
-    } catch (err: any) {
-      if (err.message && err.message.includes('404')) {
-        return { exists: false, data: null };
-      }
-      throw err;
-    }
-  }
-
-  /**
-   * 上传 JSON 文件至 WebDAV 远端 (支持 If-Match 乐观并发锁)
-   */
-  public async uploadJson(remotePath: string, data: any, ifMatch?: string): Promise<{ success: boolean; etag?: string }> {
-    const lastSlash = remotePath.lastIndexOf('/');
-    if (lastSlash > 0) {
-      const dirPath = remotePath.substring(0, lastSlash);
-      await this.ensureDirectory(dirPath);
-    }
-
-    const url = this.getFullUrl(remotePath);
-    const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-
-    const headers: Record<string, string> = {
-      Authorization: this.getAuthHeader(),
-      'Content-Type': 'application/json; charset=utf-8'
-    };
-    if (ifMatch) {
-      headers['If-Match'] = ifMatch;
-    }
-
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers,
-      body: content
-    });
-
-    if (res.status === 412) {
-      const err = new Error('412 Precondition Failed: 远端文件在此期间已被其他设备更新');
-      (err as any).status = 412;
-      (err as any).isPreconditionFailed = true;
-      throw err;
-    }
-
-    if (!res.ok && res.status !== 201 && res.status !== 204) {
-      throw new Error(`上传失败 HTTP ${res.status}: ${res.statusText}`);
-    }
-
-    const rawEtag = res.headers.get('ETag') || undefined;
-    const cleanEtag = rawEtag?.replace(/^W\//, '').replace(/"/g, '').trim();
-    return { success: true, etag: cleanEtag || rawEtag };
-  }
-
-  /**
-   * 上传二进制文件 (图片附件等) 至 WebDAV 远端
-   */
-  public async uploadBinary(
-    remotePath: string,
-    data: Blob | ArrayBuffer,
-    mimeType = 'image/png'
-  ): Promise<{ success: boolean; etag?: string }> {
-    const lastSlash = remotePath.lastIndexOf('/');
-    if (lastSlash > 0) {
-      const dirPath = remotePath.substring(0, lastSlash);
-      await this.ensureDirectory(dirPath);
-    }
-
-    const url = this.getFullUrl(remotePath);
-    const headers: Record<string, string> = {
-      Authorization: this.getAuthHeader(),
-      'Content-Type': mimeType
-    };
-
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers,
-      body: data
-    });
-
-    if (!res.ok && res.status !== 201 && res.status !== 204) {
-      throw new Error(`二进制上传失败 HTTP ${res.status}: ${res.statusText}`);
-    }
-
-    const newEtag = res.headers.get('ETag') || undefined;
-    return { success: true, etag: newEtag };
-  }
-
-  /**
-   * 下载二进制文件 (图片附件等)
-   */
-  public async downloadBinary(remotePath: string): Promise<{ exists: boolean; data: Blob | null; etag?: string }> {
-    const url = this.getFullUrl(remotePath);
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Authorization: this.getAuthHeader(),
-          'Cache-Control': 'no-cache'
-        }
-      });
-
-      if (res.status === 404) {
-        return { exists: false, data: null };
-      }
-
-      if (!res.ok) {
-        throw new Error(`二进制下载失败 HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      const etag = res.headers.get('ETag') || undefined;
-      const blob = await res.blob();
-      return { exists: true, data: blob, etag };
-    } catch (err: any) {
-      if (err.message && err.message.includes('404')) {
-        return { exists: false, data: null };
-      }
-      throw err;
-    }
-  }
-
-  /**
-   * 删除 WebDAV 远端文件
-   */
-  public async deleteFile(remotePath: string): Promise<{ success: boolean }> {
-    const url = this.getFullUrl(remotePath);
-    try {
-      const res = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-          Authorization: this.getAuthHeader()
-        }
-      });
-
-      if (res.status === 404 || res.ok || res.status === 204) {
-        return { success: true };
-      }
-      return { success: false };
-    } catch {
-      return { success: false };
-    }
-  }
-
-  /**
-   * 检查远端文件是否存在
-   */
-  public async checkFileExists(remotePath: string): Promise<boolean> {
-    const url = this.getFullUrl(remotePath);
-    try {
-      const res = await fetch(url, {
-        method: 'HEAD',
-        headers: {
-          Authorization: this.getAuthHeader()
-        }
-      }).catch(async () => {
-        return await fetch(url, {
-          method: 'PROPFIND',
-          headers: {
-            Authorization: this.getAuthHeader(),
-            Depth: '0'
-          }
-        });
-      });
-      return res.status >= 200 && res.status < 300;
-    } catch {
-      return false;
-    }
-  }
-}
 
 /**
  * WebDAV 双向同步引擎
@@ -719,7 +381,20 @@ export class WebdavSyncEngine {
   }
 
   /**
-   * 执行完整的 WebDAV 云同步流程 (支持双向墓碑合并、ETag 乐观锁重试、防网络打字冲刷、强制推送与拉取)
+   * 校验 BackupData 结构合法性，防止空对象或残缺结构覆盖远端或本地数据
+   */
+  private assertValidBackupSchema(data: any, sourceLabel: string): BackupData {
+    if (!data || typeof data !== 'object' || !Array.isArray(data.categories) || !Array.isArray(data.notes)) {
+      throw new WebdavSyncError(
+        'REMOTE_INVALID_SCHEMA',
+        `${sourceLabel}数据结构无效（缺少 categories/notes 字段），已中止同步以保护数据`
+      );
+    }
+    return data as BackupData;
+  }
+
+  /**
+   * 执行完整的 WebDAV 云同步流程 (支持双向墓碑合并、原子写入、ETag 乐观锁重试、防网络打字冲刷、防清空拦截)
    */
   public async performSync(
     getLocalData: () => BackupData,
@@ -753,11 +428,14 @@ export class WebdavSyncEngine {
           // 强制从云端覆盖本地
           const remoteResult = await client.downloadJson<BackupData>(cfg.remotePath);
           if (!remoteResult.exists || !remoteResult.data) {
-            throw new Error('远端未发现有效的备份文件');
+            throw new WebdavSyncError('HTTP_ERROR', '远端未发现有效的备份文件 (HTTP 404)');
           }
           const remoteBackup = BackupCodec.decode(JSON.stringify(remoteResult.data));
           if (!remoteBackup) {
-            throw new Error('远端备份数据解析失败');
+            throw new WebdavSyncError(
+              'REMOTE_INVALID_SCHEMA',
+              '远端备份数据结构异常（缺少 categories/notes 字段），已中止拉取覆盖以保护本地数据'
+            );
           }
           applyMergedData(remoteBackup);
           this.syncState.value = 'success';
@@ -772,14 +450,15 @@ export class WebdavSyncEngine {
         }
 
         let remoteEtag: string | undefined = undefined;
+        let remoteBackupSnapshot: BackupData | null = null;
 
         if (!options?.forcePush) {
           // 【轻量元数据短路检查】：若非强制推送且具备历史同步锚点，先通过 HEAD 探测云端 Last-Modified 与 ETag
-          // 若云端未变且本地无草稿无新改动，直接 0 字节秒级跳过，节省 99.9% 网络带宽
+          // 若远端 Content-Length 为 0，严禁短路，必须交由 downloadJson 触发异常告警
           if (cfg.lastSyncTime && cfg.lastSyncTime > 0) {
             try {
               const meta = await client.getFileMeta(cfg.remotePath);
-              if (meta.exists) {
+              if (meta.exists && meta.contentLength !== 0) {
                 const cleanRemoteEtag = meta.etag?.replace(/^W\//, '').replace(/"/g, '').trim();
                 const cleanLocalEtag = cfg.lastEtag?.replace(/^W\//, '').replace(/"/g, '').trim();
 
@@ -809,39 +488,65 @@ export class WebdavSyncEngine {
             }
           }
 
-          // 1. 下载远端文件及 ETag
+          // 1. 下载远端文件及 ETag (若远端为空 0 字节或 JSON 损坏将直接抛错中止，绝不继续覆写云端)
           const remoteResult = await client.downloadJson<BackupData>(cfg.remotePath);
           remoteEtag = remoteResult.etag;
 
-          if (remoteResult.exists && remoteResult.data) {
-            const remoteBackup = BackupCodec.decode(JSON.stringify(remoteResult.data));
-            if (remoteBackup) {
-              // 检测新设备初始化默认分类防污染：
-              // 若本地无任何便签，且分类仅为系统自带的 3 个示例分类，而云端已有用户有效数据
-              const isFreshDeviceWithDefaults =
-                (!initialLocalData.notes || initialLocalData.notes.length === 0) &&
-                (initialLocalData.categories || []).every(c => ['1', '2', '3'].includes(c.id));
-              const remoteHasUserData =
-                remoteBackup.notes.length > 0 ||
-                (remoteBackup.categories || []).some(c => !['1', '2', '3'].includes(c.id));
-
-              if (isFreshDeviceWithDefaults && remoteHasUserData) {
-                // 远端优先初始化，丢弃本地示例分类
-                finalDataToUpload = remoteBackup;
-                applyMergedData(finalDataToUpload);
-              } else {
-                // 动态拉取当前最新内存状态进行 Diff 保护，防止网络等待期间键入的字被旧快照抹除
-                const latestMemoryData = getLocalData();
-                finalDataToUpload = this.mergeBackupData(latestMemoryData, remoteBackup, cfg.lastSyncTime || 0);
-                applyMergedData(finalDataToUpload);
-              }
+          if (remoteResult.exists) {
+            const remoteBackup = remoteResult.data
+              ? BackupCodec.decode(JSON.stringify(remoteResult.data))
+              : null;
+            if (!remoteBackup) {
+              throw new WebdavSyncError(
+                'REMOTE_INVALID_SCHEMA',
+                '远端备份数据结构异常（缺少 categories/notes 字段），已中止合并以防覆盖云端'
+              );
             }
+            remoteBackupSnapshot = remoteBackup;
+
+            // 检测新设备初始化默认分类防污染：
+            // 若本地无任何便签，且分类仅为系统自带的 3 个示例分类，而云端已有用户有效数据
+            const isFreshDeviceWithDefaults =
+              (!initialLocalData.notes || initialLocalData.notes.length === 0) &&
+              (initialLocalData.categories || []).every(c => ['1', '2', '3'].includes(c.id));
+            const remoteHasUserData =
+              remoteBackup.notes.length > 0 ||
+              (remoteBackup.categories || []).some(c => !['1', '2', '3'].includes(c.id));
+
+            if (isFreshDeviceWithDefaults && remoteHasUserData) {
+              // 远端优先初始化，丢弃本地示例分类
+              finalDataToUpload = remoteBackup;
+            } else {
+              // 动态拉取当前最新内存状态进行 Diff 保护，防止网络等待期间键入的字被旧快照抹除
+              const latestMemoryData = getLocalData();
+              finalDataToUpload = this.mergeBackupData(latestMemoryData, remoteBackup, cfg.lastSyncTime || 0);
+            }
+
+            // 防空数据误覆写云端拦截 (Anti-Wipe Guard)
+            this.assertValidBackupSchema(finalDataToUpload, '合并后待上传');
+            if (remoteBackupSnapshot.notes.length > 0 && finalDataToUpload.notes.length === 0) {
+              throw new WebdavSyncError(
+                'WIPE_PROTECTION_BLOCKED',
+                `安全拦截：检测到合并结果便签数为 0，而云端存在 ${remoteBackupSnapshot.notes.length} 条记录。为防误清空云端，已中止上传；如确认清空请使用「覆盖推送到云端」`
+              );
+            }
+            if (remoteBackupSnapshot.categories.length > 0 && finalDataToUpload.categories.length === 0) {
+              throw new WebdavSyncError(
+                'WIPE_PROTECTION_BLOCKED',
+                '安全拦截：检测到合并结果分类数为 0，而云端存在分类数据。为防误清空云端，已中止上传'
+              );
+            }
+
+            applyMergedData(finalDataToUpload);
           }
+        } else {
+          // 强制推送前同样校验本地数据结构完整且非空
+          this.assertValidBackupSchema(finalDataToUpload, '本地待强制推送');
         }
 
-        // 4. 将合并后的最新全量数据推向 WebDAV 远端 (带 If-Match 保护)
+        // 4. 使用原子写入协议 (PUT .tmp -> MOVE) 推向 WebDAV 远端，并携带 If-Match 乐观并发保护
         try {
-          const uploadResult = await client.uploadJson(
+          const uploadResult = await client.uploadJsonAtomic(
             cfg.remotePath,
             finalDataToUpload,
             options?.forcePush ? undefined : remoteEtag
@@ -860,7 +565,7 @@ export class WebdavSyncEngine {
           let finalSavedEtag = uploadResult.etag;
           let finalLastSyncTime = Date.now();
 
-          // 若 uploadJson 没有返回 ETag (多数 WebDAV 服务端如坚果云的 PUT 响应不带 ETag)，
+          // 若 uploadJsonAtomic 没有返回 ETag (多数 WebDAV 服务端如坚果云/AList 的 PUT/MOVE 响应不带 ETag)，
           // 立即通过轻量 HEAD 校验并捕获服务端真实的最新 ETag 与 Last-Modified，确保后续 short-circuit 探测 100% 精准
           if (!finalSavedEtag) {
             try {
@@ -906,8 +611,9 @@ export class WebdavSyncEngine {
 
       throw new Error('同步并发重试次数超限，请稍后重试');
     } catch (err: any) {
+      const detail = err?.message || '网络异常';
       this.syncState.value = 'error';
-      this.syncMessage.value = `同步失败: ${err.message || '网络异常'}`;
+      this.syncMessage.value = detail.startsWith('同步失败:') ? detail : `同步失败: ${detail}`;
       this.saveConfig({
         lastSyncStatus: 'error',
         lastSyncMessage: this.syncMessage.value

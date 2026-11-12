@@ -1,6 +1,6 @@
 {
   "name": "moment-notes",
-  "version": "1.7.0",
+  "version": "2.1.0",
   "private": true,
   "description": "拾光便签：基于 Vue 3 + TypeScript + Vite 构建的高颜值 WebDAV 便签应用，支持纯前端与 Toolkit Tauri 插件运行。",
   "type": "module",

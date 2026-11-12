@@ -271,9 +271,10 @@ defineExpose({
           :data-tooltip="tag"
           @click.stop="copyTag(tag)"
         >
-          {{ store.prefixTagWithHash ? '# ' : '' }}{{ tag }}
+          <span v-if="store.prefixTagWithHash" class="tag-prefix">#</span>
+          <span class="tag-text">{{ tag }}</span>
         </span>
-        <span v-if="hasMore" class="note-tag-badge more" :data-tooltip="allTagsText"> ... </span>
+        <span v-if="hasMore" class="note-tag-badge more" :data-tooltip="allTagsText">···</span>
       </div>
       <!-- 隐藏的便签标签测量区域 -->
       <div
@@ -282,9 +283,10 @@ defineExpose({
         class="note-tags-list-measure"
       >
         <span v-for="tag in note.tags" :key="'measure-' + tag" class="note-tag-badge">
-          {{ store.prefixTagWithHash ? '# ' : '' }}{{ tag }}
+          <span v-if="store.prefixTagWithHash" class="tag-prefix">#</span>
+          <span class="tag-text">{{ tag }}</span>
         </span>
-        <span ref="measureEllipsisRef" class="note-tag-badge more">...</span>
+        <span ref="measureEllipsisRef" class="note-tag-badge more">···</span>
       </div>
     </template>
   </div>
@@ -454,10 +456,11 @@ defineExpose({
 .note-tags-list {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-top: 6px;
   flex-shrink: 0;
-  max-height: 48px;
+  max-height: 46px;
   overflow: hidden;
 }
 
@@ -470,45 +473,73 @@ defineExpose({
   top: 0;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   z-index: -9999;
   opacity: 0;
 }
 
 .note-tag-badge {
-  font-size: 10px;
-  line-height: 20px;
-  padding: 0 8px;
-  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
   font-weight: 500;
-  background: var(--badge-bg);
-  border: 1px solid var(--popover-border);
+  background: var(--card-btn-hover-bg);
+  border: 1px solid var(--card-border);
   color: inherit;
-  opacity: 0.85;
   cursor: pointer;
-  transition: background-color 0.15s, opacity 0.15s;
-
+  user-select: none;
   max-width: 100%;
-  display: -webkit-inline-box;
-  -webkit-box-orient: vertical;
-  line-clamp: 2;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  word-break: break-all;
-  white-space: normal;
+  box-sizing: border-box;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast,
+    transform $transition-fast;
+
+  .dark-theme & {
+    border-color: var(--card-border-dark);
+  }
+
+  .tag-prefix {
+    opacity: 0.55;
+    font-weight: 600;
+    line-height: 14px;
+    flex-shrink: 0;
+  }
+
+  .tag-text {
+    @include text-ellipsis;
+    line-height: 14px;
+    display: block;
+  }
 
   &:hover {
-    opacity: 1;
-    background: var(--card-btn-hover-bg);
+    background: var(--card-border);
     color: var(--card-btn-hover-color);
+
+    .dark-theme & {
+      background: var(--card-border-dark);
+    }
+  }
+
+  &:active {
+    transform: scale(0.96);
   }
 
   &.more {
     cursor: help;
-    &:hover {
-      background: var(--badge-bg);
-      color: inherit;
-      opacity: 0.85;
+    padding: 0 6px;
+    letter-spacing: 1px;
+    font-weight: 700;
+    line-height: 14px;
+
+    &:active {
+      transform: none;
     }
   }
 }
